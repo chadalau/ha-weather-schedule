@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.0.5';
+const VERSION = '1.0.6';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -31,6 +31,7 @@ const TEXT = {
         phase: {propagation: 'Propagation', veg_early: 'Early vegetative', veg_late: 'Late vegetative', flower_early: 'Early flower', flower_late: 'Late flower', dry: 'Drying'},
         status: {on_target: 'On target', vpd_low: 'VPD low', vpd_high: 'VPD high', too_cold: 'Too cold', too_warm: 'Too warm', too_dry: 'Too dry', too_humid: 'Too humid'},
         temperature: 'Temperature', humidity: 'Humidity', co2: 'CO₂', dewPoint: 'Dew point',
+        dewPointShort: 'Dew point',
         fans: 'Fans', on: 'On', off: 'Off', unavailable: 'Unavailable',
         target: 'target', margin: 'margin', noHistory: 'No history yet', noRooms: 'Add a room to this card',
         settings: 'Room settings', sensorsGroup: 'Sensors', paramsGroup: 'Parameters',
@@ -52,6 +53,7 @@ const TEXT = {
         phase: {propagation: 'Propagação', veg_early: 'Vegetativo inicial', veg_late: 'Vegetativo tardio', flower_early: 'Floração inicial', flower_late: 'Floração tardia', dry: 'Secagem'},
         status: {on_target: 'Na faixa', vpd_low: 'VPD baixo', vpd_high: 'VPD alto', too_cold: 'Frio demais', too_warm: 'Quente demais', too_dry: 'Seco demais', too_humid: 'Úmido demais'},
         temperature: 'Temperatura', humidity: 'Umidade', co2: 'CO₂', dewPoint: 'Ponto de orvalho',
+        dewPointShort: 'P. de orvalho',
         fans: 'Ventiladores', on: 'Ligado', off: 'Desligado', unavailable: 'Indisponível',
         target: 'alvo', margin: 'margem', noHistory: 'Ainda sem histórico', noRooms: 'Adicione uma sala a este card',
         settings: 'Ajustes da sala', sensorsGroup: 'Sensores', paramsGroup: 'Parâmetros',
@@ -138,10 +140,16 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--primary-co
 .tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; border: 1px solid var(--divider-color);
   border-radius: 10px; padding: 10px 11px 12px; }
 .tile .label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   color: var(--secondary-text-color); }
+/* "P. DE ORVALHO" é o único rótulo que não cabe numa coluna de 110px: só ele
+   cede fonte e espaçamento, e só enquanto a coluna for estreita. */
+.tile[data-key="dew"] .label { font-size: clamp(9.4px, 2.05cqw, 11px); letter-spacing: .03em; }
 
 @container (max-width: 430px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Em duas colunas sobra largura: o rótulo do orvalho volta ao tamanho dos outros. */
+  .tile[data-key="dew"] .label { font-size: 11px; letter-spacing: .06em; }
 }
 .tile .value { display: flex; align-items: baseline; gap: 4px; font-size: 21px; font-weight: 500;
   font-variant-numeric: tabular-nums; color: var(--primary-text-color); }
@@ -1069,7 +1077,7 @@ class WeatherScheduleCard extends HTMLElement {
         }
         if (Number.isFinite(climate.dew)) {
             tiles.push({
-                key: 'dew', label: text.dewPoint, value: climate.dew, unit: '°C', digits: 1,
+                key: 'dew', label: text.dewPointShort, value: climate.dew, unit: '°C', digits: 1,
                 entity: room.dew_point,
                 // Condensation shows up first on the coldest surface, which the
                 // air temperature stands in for; keep a couple of degrees of air.
