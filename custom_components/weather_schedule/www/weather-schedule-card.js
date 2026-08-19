@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -152,15 +152,22 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--primary-co
   background: var(--primary-text-color); transform: translateX(-1.5px); }
 .tile.drift .pin { background: var(--error-color, #ce4234); }
 .tile .window { font-size: 11.5px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
-/* O VPD ganha a linha inteira: rótulo à esquerda, valor à direita, barra
-   atravessando o box todo. É a leitura que manda no card. */
-.tile.banner { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto;
-  column-gap: 12px; align-items: baseline; }
-.tile.banner .label { grid-column: 1; grid-row: 1; align-self: center; }
-.tile.banner .value { grid-column: 2; grid-row: 1; font-size: 28px; }
-.tile.banner .track { grid-column: 1 / -1; grid-row: 2; height: 8px; border-radius: 4px; }
-.tile.banner .pin { top: -2px; height: 12px; }
-.tile.banner .window { grid-column: 1 / -1; grid-row: 3; }
+/* O VPD ocupa a fileira inteira numa linha só: rótulo, leitura, a barra
+   esticando no espaço que sobra e a faixa-alvo fechando à direita. */
+.tile.banner { grid-column: 1 / -1; display: grid; align-items: center; gap: 0;
+  grid-template-columns: auto auto minmax(48px, 1fr) auto; column-gap: 12px;
+  padding: 7px 12px; }
+.tile.banner .label { grid-row: 1; }
+.tile.banner .value { grid-row: 1; font-size: 22px; line-height: 1.15; }
+.tile.banner .track { grid-row: 1; height: 6px; }
+.tile.banner .pin { top: -3px; height: 12px; }
+.tile.banner .window { grid-row: 1; white-space: nowrap; }
+
+@container (max-width: 430px) {
+  /* Sem largura para tudo, a faixa-alvo sai: ela continua no title do box. */
+  .tile.banner { grid-template-columns: auto auto minmax(36px, 1fr); column-gap: 10px; }
+  .tile.banner .window { display: none; }
+}
 
 .tile.pick { cursor: pointer; }
 .tile.pick:hover { border-color: var(--ws-teal-line); }
@@ -1039,11 +1046,11 @@ class WeatherScheduleCard extends HTMLElement {
 
     #renderTiles(room, climate, bounds) {
         const text = this.#text;
+        const vpd = {
+            key: 'vpd', label: 'VPD', value: climate.vpd, unit: 'kPa', digits: 2,
+            min: bounds.vpd_min, max: bounds.vpd_max, scale: [0, 2], entity: room.vpd,
+        };
         const tiles = [
-            {
-                key: 'vpd', label: 'VPD', value: climate.vpd, unit: 'kPa', digits: 2,
-                min: bounds.vpd_min, max: bounds.vpd_max, scale: [0, 2], entity: room.vpd,
-            },
             {
                 key: 'temperature', label: text.temperature, value: climate.temperature, unit: '°C', digits: 1,
                 min: bounds.temp_min, max: bounds.temp_max, scale: [15, 35], entity: room.temperature,
@@ -1072,6 +1079,10 @@ class WeatherScheduleCard extends HTMLElement {
                     : '',
             });
         }
+
+        // O VPD fecha a lista: assim a faixa dele encosta no gráfico, que é
+        // justamente o que o gráfico desenha.
+        tiles.push(vpd);
 
         const container = this.#node.tiles;
         // O banner do VPD atravessa a fileira; as colunas contam só as demais.
