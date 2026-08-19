@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -1531,8 +1531,9 @@ class WeatherScheduleCard extends HTMLElement {
             const air = Math.max((highest - lowest) * 0.25, 0.08);
             const near = Math.max(0, Math.floor((lowest - air) * 10) / 10);
             const far = Math.min(ceiling, Math.ceil((highest + air) * 10) / 10);
-            // Abaixo de meio kPa de amplitude o desenho vira ruído ampliado.
-            if (far - near >= 0.4 && far - near < (ceiling - floor) * 0.75) {
+            // Abaixo de meio kPa de amplitude o desenho vira ruído ampliado;
+            // acima de 9/10 da escala não sobra o que ampliar.
+            if (far - near >= 0.4 && far - near < (ceiling - floor) * 0.9) {
                 floor = near;
                 ceiling = far;
             }
