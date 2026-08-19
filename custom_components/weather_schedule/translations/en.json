@@ -1,0 +1,173 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Room",
+        "description": "Name the room, tent or greenhouse you are adding.",
+        "data": {
+          "name": "Name"
+        }
+      },
+      "sensors": {
+        "title": "Sensors",
+        "description": "Air temperature and humidity are required. An infrared leaf sensor replaces the assumed leaf drop when you have one.",
+        "data": {
+          "air_temperature": "Air temperature",
+          "relative_humidity": "Relative humidity",
+          "leaf_sensor": "Leaf temperature (infrared)",
+          "carbon_dioxide": "CO₂",
+          "leaf_drop": "Leaf runs colder than air by"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This room is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weather Schedule",
+        "menu_options": {
+          "sensors": "Sensors",
+          "phase": "Target windows",
+          "alert": "Alert and CO₂",
+          "fans": "Fans"
+        }
+      },
+      "sensors": {
+        "title": "Sensors",
+        "data": {
+          "air_temperature": "Air temperature",
+          "relative_humidity": "Relative humidity",
+          "leaf_sensor": "Leaf temperature (infrared)",
+          "carbon_dioxide": "CO₂",
+          "leaf_drop": "Leaf runs colder than air by"
+        }
+      },
+      "phase": {
+        "title": "Target windows",
+        "description": "Pick the phase you want to retune.",
+        "data": {
+          "phase": "Phase"
+        }
+      },
+      "bounds": {
+        "title": "Target windows",
+        "description": "Values used while the room is in {phase}.",
+        "data": {
+          "vpd_min": "VPD minimum (kPa)",
+          "vpd_max": "VPD maximum (kPa)",
+          "temp_min": "Temperature minimum (°C)",
+          "temp_max": "Temperature maximum (°C)",
+          "rh_min": "Humidity minimum (%)",
+          "rh_max": "Humidity maximum (%)",
+          "co2_min": "CO₂ minimum (ppm)",
+          "co2_max": "CO₂ maximum (ppm)"
+        }
+      },
+      "alert": {
+        "title": "Alert and CO₂",
+        "description": "How long the room has to hold before the alert believes it.",
+        "data": {
+          "trip_minutes": "Off target before alerting",
+          "clear_minutes": "Back on target before clearing",
+          "ambient_co2": "Room is not CO₂ enriched"
+        },
+        "data_description": {
+          "ambient_co2": "Ambient CO₂ is normal here, so a reading under the window is not reported as under target."
+        }
+      },
+      "fans": {
+        "title": "Fans",
+        "data": {
+          "fans": "Fans of this room"
+        }
+      }
+    },
+    "error": {
+      "min_above_max": "The minimum cannot be greater than the maximum."
+    }
+  },
+  "selector": {
+    "phase": {
+      "options": {
+        "propagation": "Propagation",
+        "veg_early": "Early vegetative",
+        "veg_late": "Late vegetative",
+        "flower_early": "Early flower",
+        "flower_late": "Late flower",
+        "dry": "Drying"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "vpd": {
+        "name": "VPD"
+      },
+      "leaf_temperature": {
+        "name": "Leaf temperature"
+      },
+      "dew_point": {
+        "name": "Dew point"
+      },
+      "condensation_margin": {
+        "name": "Condensation margin"
+      },
+      "absolute_humidity": {
+        "name": "Absolute humidity"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "on_target": "On target",
+          "vpd_low": "VPD low",
+          "vpd_high": "VPD high",
+          "too_cold": "Too cold",
+          "too_warm": "Too warm",
+          "too_dry": "Too dry",
+          "too_humid": "Too humid",
+          "co2_low": "CO₂ low",
+          "co2_high": "CO₂ high"
+        }
+      },
+      "carbon_dioxide_status": {
+        "name": "CO₂ status",
+        "state": {
+          "under": "Under target",
+          "on_target": "On target",
+          "over": "Over target"
+        }
+      }
+    },
+    "select": {
+      "phase": {
+        "name": "Phase",
+        "state": {
+          "propagation": "Propagation",
+          "veg_early": "Early vegetative",
+          "veg_late": "Late vegetative",
+          "flower_early": "Early flower",
+          "flower_late": "Late flower",
+          "dry": "Drying"
+        }
+      }
+    },
+    "number": {
+      "leaf_drop": {
+        "name": "Leaf drop"
+      }
+    },
+    "binary_sensor": {
+      "alert": {
+        "name": "Alert"
+      }
+    },
+    "switch": {
+      "timers": {
+        "name": "Fan timers"
+      }
+    }
+  }
+}

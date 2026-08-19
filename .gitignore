@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Relatórios de revisão, só para consulta local
+reviews/

@@ -1,0 +1,173 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sala",
+        "description": "Dê um nome para a sala, tenda ou estufa que você está adicionando.",
+        "data": {
+          "name": "Nome"
+        }
+      },
+      "sensors": {
+        "title": "Sensores",
+        "description": "Temperatura do ar e umidade são obrigatórias. Um sensor infravermelho de folha substitui a diferença estimada quando você tem um.",
+        "data": {
+          "air_temperature": "Temperatura do ar",
+          "relative_humidity": "Umidade relativa",
+          "leaf_sensor": "Temperatura da folha (infravermelho)",
+          "carbon_dioxide": "CO₂",
+          "leaf_drop": "Quanto a folha fica mais fria que o ar"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Esta sala já está configurada."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weather Schedule",
+        "menu_options": {
+          "sensors": "Sensores",
+          "phase": "Faixas-alvo",
+          "alert": "Alerta e CO₂",
+          "fans": "Ventiladores"
+        }
+      },
+      "sensors": {
+        "title": "Sensores",
+        "data": {
+          "air_temperature": "Temperatura do ar",
+          "relative_humidity": "Umidade relativa",
+          "leaf_sensor": "Temperatura da folha (infravermelho)",
+          "carbon_dioxide": "CO₂",
+          "leaf_drop": "Quanto a folha fica mais fria que o ar"
+        }
+      },
+      "phase": {
+        "title": "Faixas-alvo",
+        "description": "Escolha a fase que você quer ajustar.",
+        "data": {
+          "phase": "Fase"
+        }
+      },
+      "bounds": {
+        "title": "Faixas-alvo",
+        "description": "Valores usados enquanto a sala está em {phase}.",
+        "data": {
+          "vpd_min": "VPD mínimo (kPa)",
+          "vpd_max": "VPD máximo (kPa)",
+          "temp_min": "Temperatura mínima (°C)",
+          "temp_max": "Temperatura máxima (°C)",
+          "rh_min": "Umidade mínima (%)",
+          "rh_max": "Umidade máxima (%)",
+          "co2_min": "CO₂ mínimo (ppm)",
+          "co2_max": "CO₂ máximo (ppm)"
+        }
+      },
+      "alert": {
+        "title": "Alerta e CO₂",
+        "description": "Quanto tempo a sala precisa se manter assim antes de o alerta acreditar.",
+        "data": {
+          "trip_minutes": "Fora da faixa antes de alertar",
+          "clear_minutes": "De volta na faixa antes de desligar",
+          "ambient_co2": "Sala sem enriquecimento de CO₂"
+        },
+        "data_description": {
+          "ambient_co2": "Aqui o CO₂ ambiente é o normal, então leitura abaixo da faixa não é reportada como fora."
+        }
+      },
+      "fans": {
+        "title": "Ventiladores",
+        "data": {
+          "fans": "Ventiladores desta sala"
+        }
+      }
+    },
+    "error": {
+      "min_above_max": "O mínimo não pode ser maior que o máximo."
+    }
+  },
+  "selector": {
+    "phase": {
+      "options": {
+        "propagation": "Propagação",
+        "veg_early": "Vegetativo inicial",
+        "veg_late": "Vegetativo tardio",
+        "flower_early": "Floração inicial",
+        "flower_late": "Floração tardia",
+        "dry": "Secagem"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "vpd": {
+        "name": "VPD"
+      },
+      "leaf_temperature": {
+        "name": "Temperatura da folha"
+      },
+      "dew_point": {
+        "name": "Ponto de orvalho"
+      },
+      "condensation_margin": {
+        "name": "Margem de condensação"
+      },
+      "absolute_humidity": {
+        "name": "Umidade absoluta"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "on_target": "Na faixa",
+          "vpd_low": "VPD baixo",
+          "vpd_high": "VPD alto",
+          "too_cold": "Frio demais",
+          "too_warm": "Quente demais",
+          "too_dry": "Seco demais",
+          "too_humid": "Úmido demais",
+          "co2_low": "CO₂ baixo",
+          "co2_high": "CO₂ alto"
+        }
+      },
+      "carbon_dioxide_status": {
+        "name": "Status do CO₂",
+        "state": {
+          "under": "Abaixo da faixa",
+          "on_target": "Na faixa",
+          "over": "Acima da faixa"
+        }
+      }
+    },
+    "select": {
+      "phase": {
+        "name": "Fase",
+        "state": {
+          "propagation": "Propagação",
+          "veg_early": "Vegetativo inicial",
+          "veg_late": "Vegetativo tardio",
+          "flower_early": "Floração inicial",
+          "flower_late": "Floração tardia",
+          "dry": "Secagem"
+        }
+      }
+    },
+    "number": {
+      "leaf_drop": {
+        "name": "Diferença da folha"
+      }
+    },
+    "binary_sensor": {
+      "alert": {
+        "name": "Alerta"
+      }
+    },
+    "switch": {
+      "timers": {
+        "name": "Timers dos ventiladores"
+      }
+    }
+  }
+}
