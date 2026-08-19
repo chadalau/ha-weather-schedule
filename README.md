@@ -113,6 +113,7 @@ change here is exactly what the Configure dialog would have changed.
 | `rooms[].co2` | — | Adds the CO₂ tile — point it at the raw CO₂ sensor |
 | `rooms[].leaf_drop` | `2` | Leaf gap used only when the card has to compute VPD by itself |
 | `rooms[].fans` | — | `fan.*` or `switch.*` entities, each with an optional `name`. Usually left out: the gear stores them in the integration |
+| `scale` | `auto` | The VPD chart closes in on the range the room actually used, keeping the target window in frame; `full` pins it to the whole 0–2 kPa span |
 | `language` | `pt` | The card speaks Brazilian Portuguese by default, whatever the Home Assistant locale is; set `en` for English |
 
 Fans call `fan.toggle` / `switch.toggle`, and `fan.set_percentage` for the

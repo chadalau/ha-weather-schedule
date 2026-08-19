@@ -9,11 +9,12 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
 const HISTORY_RANGES = [6, 24, 72, 168];
+const CHART_MAX_POINTS = 1500;
 
 /** Fixed VPD bands, drawn behind the trend so a value reads without a legend. */
 const VPD_BANDS = [
@@ -1429,7 +1430,7 @@ class WeatherScheduleCard extends HTMLElement {
                 entity_ids: [entityId],
                 minimal_response: true,
                 no_attributes: true,
-                significant_changes_only: false,
+                significant_changes_only: true,
             });
             return (answer?.[entityId] || []).map(point => ({
                 time: (point.lu ?? point.last_updated ?? 0) * 1000,
@@ -1475,13 +1476,27 @@ class WeatherScheduleCard extends HTMLElement {
         return [...rebuilt, ...recorded];
     }
 
+    /* O número de amostras devolvidas cresce junto com o histórico gravado no
+       recorder; sem um teto, a linha vira um SVG com dezenas de milhares de
+       pontos e o navegador leva segundos para desenhá-lo. Mantém um número
+       fixo de amostras espaçadas de forma uniforme, preservando a forma. */
+    #downsample(points, limit) {
+        if (points.length <= limit) return points;
+        const kept = new Array(limit);
+        const step = (points.length - 1) / (limit - 1);
+        for (let i = 0; i < limit; i++) kept[i] = points[Math.round(i * step)];
+        kept[limit - 1] = points[points.length - 1];
+        return kept;
+    }
+
     /* O mesmo motor desenha o gráfico do card e o do diálogo. O alvo diz onde
        pintar; o resto — bandas, faixa, pontos por hora, hover — é igual nos dois. */
     #paint(target, spec, series, hours) {
         const svg = target.svg;
         const now = Date.now();
         const start = now - hours * 3600000;
-        const points = (series || []).filter(point => point.time >= start).sort((a, b) => a.time - b.time);
+        let points = (series || []).filter(point => point.time >= start).sort((a, b) => a.time - b.time);
+        points = this.#downsample(points, CHART_MAX_POINTS);
         if (Number.isFinite(spec.value)) points.push({time: now, value: spec.value});
 
         svg.replaceChildren();
@@ -1505,6 +1520,24 @@ class WeatherScheduleCard extends HTMLElement {
 
         let floor = 0;
         let ceiling = Math.max(2, Math.ceil((Math.max(...values) + 0.2) * 5) / 5);
+        if (spec.isVpd && this.#config.scale !== 'full') {
+            // Uma sala estável mora numa faixa estreita: mostrada em 0–2 kPa
+            // ela vira uma linha reta. O eixo então fecha em volta do que a
+            // sala fez, sempre com a janela-alvo dentro do quadro, para o zoom
+            // não esconder justamente a referência.
+            const seen = [...values, spec.low, spec.high].filter(Number.isFinite);
+            const lowest = Math.min(...seen);
+            const highest = Math.max(...seen);
+            const air = Math.max((highest - lowest) * 0.25, 0.08);
+            const near = Math.max(0, Math.floor((lowest - air) * 10) / 10);
+            const far = Math.min(ceiling, Math.ceil((highest + air) * 10) / 10);
+            // Abaixo de meio kPa de amplitude o desenho vira ruído ampliado.
+            if (far - near >= 0.4 && far - near < (ceiling - floor) * 0.75) {
+                floor = near;
+                ceiling = far;
+            }
+        }
+        const zoomed = spec.isVpd && floor > 0;
         if (!spec.isVpd) {
             const candidates = [...values, spec.low, spec.high].filter(Number.isFinite);
             const low = Math.min(...candidates);
@@ -1524,9 +1557,11 @@ class WeatherScheduleCard extends HTMLElement {
                 svg.appendChild(make('rect', {
                     x: 0, y: top, width, height: bottom - top, fill: band.color, opacity: 0.24,
                 }));
-                const label = make('text', {x: pad.left + 8, y: top + 16, class: 'band-label'});
-                label.textContent = this.#text.band[band.key];
-                svg.appendChild(label);
+                if (bottom - top >= 22) {
+                    const label = make('text', {x: pad.left + 8, y: top + 16, class: 'band-label'});
+                    label.textContent = this.#text.band[band.key];
+                    svg.appendChild(label);
+                }
             }
         } else if (Number.isFinite(spec.low) || Number.isFinite(spec.high)) {
             const top = y(Number.isFinite(spec.high) ? spec.high : ceiling);
@@ -1547,15 +1582,19 @@ class WeatherScheduleCard extends HTMLElement {
             svg.appendChild(make('line', {
                 x1: pad.left, y1: y(value), x2: width - pad.right, y2: y(value), class: 'grid',
             }));
-            if (spec.isVpd || index === 0 || index === 5) continue;
-            const label = make('text', {x: pad.left + 6, y: y(value) - 4, class: 'axis-value'});
+            if ((spec.isVpd && !zoomed) || index === 0 || index === 5) continue;
+            // No gráfico de VPD a esquerda é dos rótulos das bandas; a escala
+            // vai para a direita para as duas não se atropelarem.
+            const label = make('text', zoomed
+                ? {x: width - pad.right - 6, y: y(value) - 4, class: 'axis-value', 'text-anchor': 'end'}
+                : {x: pad.left + 6, y: y(value) - 4, class: 'axis-value'});
             label.textContent = `${this.#number(value, spec.digits)} ${spec.unit}`;
             svg.appendChild(label);
         }
 
         if (spec.isVpd) {
             for (const edge of [spec.low, spec.high]) {
-                if (!Number.isFinite(edge) || edge > ceiling) continue;
+                if (!Number.isFinite(edge) || edge > ceiling || edge < floor) continue;
                 svg.appendChild(make('line', {
                     x1: pad.left, y1: y(edge), x2: width - pad.right, y2: y(edge), class: 'edge',
                 }));
