@@ -131,12 +131,26 @@ Editable per room under the integration's **Configure** → Target windows.
 
 | Phase | VPD (kPa) | Temp (°C) | RH (%) | CO₂ (ppm) |
 |-------|-----------|-----------|--------|-----------|
-| Propagation | 0.4 – 0.8 | 22 – 26 | 70 – 85 | 400 – 800 |
-| Early vegetative | 0.8 – 1.0 | 22 – 28 | 60 – 70 | 700 – 1000 |
-| Late vegetative | 1.0 – 1.2 | 22 – 28 | 55 – 65 | 800 – 1200 |
-| Early flower | 1.2 – 1.4 | 21 – 26 | 50 – 60 | 1000 – 1200 |
-| Late flower | 1.4 – 1.6 | 20 – 25 | 45 – 55 | 800 – 1000 |
-| Drying | 1.0 – 1.2 | 18 – 20 | 55 – 62 | 400 – 800 |
+| Propagation | 0.4 – 0.6 | 22 – 26 | 68 – 75 | 400 – 800 |
+| Early vegetative | 0.8 – 1.0 | 22 – 28 | 57 – 63 | 700 – 1000 |
+| Late vegetative | 1.0 – 1.2 | 22 – 28 | 51 – 57 | 800 – 1200 |
+| Early flower | 1.0 – 1.2 | 21 – 26 | 47 – 54 | 1000 – 1200 |
+| Late flower | 1.1 – 1.3 | 20 – 25 | 41 – 48 | 800 – 1000 |
+| Drying | 0.6 – 0.9 | 15 – 18 | 52 – 68 | 400 – 800 |
+
+The VPD windows follow the literature: about 0.3–0.6 kPa while cuttings root
+([MSU Extension](https://www.canr.msu.edu/news/why_should_greenhouse_growers_pay_attention_to_vapor_pressure_deficit_and_n)),
+0.8–1.1 through vegetative growth, and 1.0–1.5 in flower — the range cited by
+[Frontiers in Plant Science (2025)](https://doi.org/10.3389/fpls.2025.1678142),
+whose high-humidity treatment (VPD 0.25 kPa) lost 71% of its flower biomass.
+Drying follows the 60/60 rule, 15–18 °C at 55–65% RH.
+
+The humidity windows are not independent: each one is the humidity that produces
+that phase's VPD at that phase's mid temperature. Picking the three by feel
+leaves a room permanently off target, since obeying one window breaks another.
+In the drying phase the leaf gap is dropped altogether — harvested material does
+not transpire, so its VPD is the air's own, which is why 60/60 reads 0.7 kPa and
+not the 0.5 a leaf offset would give.
 
 The CO₂ windows assume an enriched room. A room without injection sits at
 ambient CO₂, so tick **Room is not CO₂ enriched** under Configure → Alert and

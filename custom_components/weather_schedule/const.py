@@ -7,7 +7,7 @@ from typing import Final
 DOMAIN: Final = "weather_schedule"
 
 # Keep in sync with manifest.json: it also busts the browser cache of the card.
-VERSION: Final = "1.0.6"
+VERSION: Final = "1.1.0"
 
 CARD_URL_PATH: Final = "/weather_schedule_card"
 CARD_FILENAME: Final = "weather-schedule-card.js"
@@ -89,40 +89,48 @@ STARTING_PHASE: Final = PHASE_VEG_LATE
 # Starting points only: each room edits its own profiles in the options flow.
 # CO2 bounds assume an enriched room; see CONF_AMBIENT_CO2 for rooms without it.
 DEFAULT_PROFILES: Final[dict[str, dict[str, float]]] = {
+    # As janelas de VPD seguem a literatura: ~0,3-0,6 kPa no enraizamento
+    # (MSU Extension), 0,8-1,1 no vegetativo e 1,0-1,5 na floração (revisão
+    # citada em Frontiers in Plant Science, 2025), e a secagem na regra 60/60.
+    # As janelas de umidade não são independentes: cada uma é a que produz o
+    # VPD da fase na temperatura média dela, com a folha 2 °C abaixo do ar —
+    # declarar as três à toa deixa a sala em desvio permanente.
     PHASE_PROPAGATION: {
-        BOUND_VPD_MIN: 0.4, BOUND_VPD_MAX: 0.8,
+        BOUND_VPD_MIN: 0.4, BOUND_VPD_MAX: 0.6,
         BOUND_TEMP_MIN: 22, BOUND_TEMP_MAX: 26,
-        BOUND_RH_MIN: 70, BOUND_RH_MAX: 85,
+        BOUND_RH_MIN: 68, BOUND_RH_MAX: 75,
         BOUND_CO2_MIN: 400, BOUND_CO2_MAX: 800,
     },
     PHASE_VEG_EARLY: {
         BOUND_VPD_MIN: 0.8, BOUND_VPD_MAX: 1.0,
         BOUND_TEMP_MIN: 22, BOUND_TEMP_MAX: 28,
-        BOUND_RH_MIN: 60, BOUND_RH_MAX: 70,
+        BOUND_RH_MIN: 57, BOUND_RH_MAX: 63,
         BOUND_CO2_MIN: 700, BOUND_CO2_MAX: 1000,
     },
     PHASE_VEG_LATE: {
         BOUND_VPD_MIN: 1.0, BOUND_VPD_MAX: 1.2,
         BOUND_TEMP_MIN: 22, BOUND_TEMP_MAX: 28,
-        BOUND_RH_MIN: 55, BOUND_RH_MAX: 65,
+        BOUND_RH_MIN: 51, BOUND_RH_MAX: 57,
         BOUND_CO2_MIN: 800, BOUND_CO2_MAX: 1200,
     },
     PHASE_FLOWER_EARLY: {
-        BOUND_VPD_MIN: 1.2, BOUND_VPD_MAX: 1.4,
+        BOUND_VPD_MIN: 1.0, BOUND_VPD_MAX: 1.2,
         BOUND_TEMP_MIN: 21, BOUND_TEMP_MAX: 26,
-        BOUND_RH_MIN: 50, BOUND_RH_MAX: 60,
+        BOUND_RH_MIN: 47, BOUND_RH_MAX: 54,
         BOUND_CO2_MIN: 1000, BOUND_CO2_MAX: 1200,
     },
     PHASE_FLOWER_LATE: {
-        BOUND_VPD_MIN: 1.4, BOUND_VPD_MAX: 1.6,
+        BOUND_VPD_MIN: 1.1, BOUND_VPD_MAX: 1.3,
         BOUND_TEMP_MIN: 20, BOUND_TEMP_MAX: 25,
-        BOUND_RH_MIN: 45, BOUND_RH_MAX: 55,
+        BOUND_RH_MIN: 41, BOUND_RH_MAX: 48,
         BOUND_CO2_MIN: 800, BOUND_CO2_MAX: 1000,
     },
+    # Na secagem não há folha transpirando, então o VPD é o do próprio ar; é
+    # por isso que 60/60 dá 0,7 kPa e não os 0,5 que o desconto de folha daria.
     PHASE_DRY: {
-        BOUND_VPD_MIN: 1.0, BOUND_VPD_MAX: 1.2,
-        BOUND_TEMP_MIN: 18, BOUND_TEMP_MAX: 20,
-        BOUND_RH_MIN: 55, BOUND_RH_MAX: 62,
+        BOUND_VPD_MIN: 0.6, BOUND_VPD_MAX: 0.9,
+        BOUND_TEMP_MIN: 15, BOUND_TEMP_MAX: 18,
+        BOUND_RH_MIN: 52, BOUND_RH_MAX: 68,
         BOUND_CO2_MIN: 400, BOUND_CO2_MAX: 800,
     },
 }

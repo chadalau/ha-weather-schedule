@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.0.6';
+const VERSION = '1.1.0';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -121,10 +121,24 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--primary-co
 .status.drift { border-color: var(--ws-amber-line); color: var(--ws-amber); }
 .status.drift .dot { background: var(--ws-amber); }
 
-.phase { padding-right: 8px; }
-.phase select { appearance: none; border: 0; background: transparent; color: inherit; font: inherit;
-  cursor: pointer; padding-right: 2px; }
+/* O seletor de fase e do card, nao do sistema: um <select> nativo abre o
+   menu do sistema operacional, que ignora o tema e destoa de tudo aqui. */
+.phase-wrap { position: relative; display: inline-flex; }
+.chip.phase { gap: 7px; padding-right: 6px; cursor: pointer; }
+.chip.phase:hover, .chip.phase[aria-expanded="true"] { border-color: var(--ws-teal); }
+.chip.phase[disabled] { opacity: .55; cursor: default; }
+.chip.phase .caret { --mdc-icon-size: 16px; color: var(--secondary-text-color); display: inline-flex; }
 .phase .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ws-teal); flex: 0 0 auto; }
+
+.phase-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 6; min-width: 176px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border: 1px solid var(--divider-color); border-radius: 12px;
+  background: var(--card-background-color); box-shadow: 0 10px 28px rgba(0, 0, 0, .38); }
+.phase-menu button { appearance: none; width: 100%; text-align: left; border: 0; border-radius: 8px;
+  padding: 8px 10px; background: transparent; color: var(--primary-text-color); font-size: 13px;
+  white-space: nowrap; }
+.phase-menu button:hover { background: var(--secondary-background-color); }
+.phase-menu button.on { background: var(--ws-teal); color: var(--text-primary-color, #fff); }
 
 .gear { width: 30px; padding: 0; justify-content: center; color: var(--secondary-text-color);
   --mdc-icon-size: 17px; cursor: pointer; }
@@ -250,7 +264,12 @@ svg.chart { display: block; width: 100%; height: auto; border-radius: 10px; }
 .tick { fill: var(--secondary-text-color); font-size: 11px; }
 .band-label { fill: var(--primary-text-color); font-size: 12px; font-weight: 500; }
 .trend { fill: none; stroke: var(--primary-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.edge { stroke: var(--primary-text-color); stroke-width: 1; stroke-dasharray: 5 4; opacity: .55; }
+/* A janela-alvo e a referencia que se le primeiro no grafico: linha grossa,
+   traco longo e um claredo entre as duas, para ela nao se perder no meio das
+   bandas de fase que ficam atras. */
+.edge { stroke: var(--primary-text-color); stroke-width: 2.25; stroke-dasharray: 9 5;
+  stroke-linecap: round; opacity: .92; }
+.target-zone { fill: var(--primary-text-color); opacity: .08; }
 .head { fill: var(--primary-color); stroke: var(--card-background-color); stroke-width: 3; }
 .head-label { fill: var(--primary-text-color); font-size: 12px; font-weight: 500; }
 .empty { padding: 20px 0; text-align: center; color: var(--secondary-text-color); }
@@ -356,6 +375,7 @@ class WeatherScheduleCard extends HTMLElement {
     #historySpec = null;
     #historyHours = 24;
     #request = 0;
+    #closePhaseMenu = null;
     #node = {};
 
     static getStubConfig() {
@@ -877,7 +897,13 @@ class WeatherScheduleCard extends HTMLElement {
                 <div class="rooms" role="group"></div>
                 <div class="header-right">
                     <span class="chip status" hidden><span class="dot"></span><span class="status-text"></span></span>
-                    <label class="chip phase" hidden><span class="dot"></span><select></select></label>
+                    <div class="phase-wrap" hidden>
+                        <button type="button" class="chip phase" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="dot"></span><span class="phase-text"></span>
+                            <span class="caret"><ha-icon icon="mdi:chevron-down"></ha-icon></span>
+                        </button>
+                        <div class="phase-menu" role="listbox" hidden></div>
+                    </div>
                     <button type="button" class="chip gear" title="${this.#text.settings}"
                             aria-label="${this.#text.settings}"><ha-icon icon="mdi:cog"></ha-icon></button>
                 </div>
@@ -929,8 +955,10 @@ class WeatherScheduleCard extends HTMLElement {
 
         this.#node = {
             rooms: card.querySelector('.rooms'),
-            phase: card.querySelector('.phase'),
-            phaseSelect: card.querySelector('.phase select'),
+            phase: card.querySelector('.phase-wrap'),
+            phaseChip: card.querySelector('.chip.phase'),
+            phaseText: card.querySelector('.phase-text'),
+            phaseMenu: card.querySelector('.phase-menu'),
             phaseDot: card.querySelector('.phase .dot'),
             gear: card.querySelector('.gear'),
             tiles: card.querySelector('.tiles'),
@@ -976,15 +1004,41 @@ class WeatherScheduleCard extends HTMLElement {
         this.#node.sheetCancel.addEventListener('click', () => this.#node.sheet.close());
         this.#node.sheetSave.addEventListener('click', () => this.#saveSheet());
 
-        this.#node.phaseSelect.addEventListener('change', event => {
+        this.#node.phaseChip.addEventListener('click', event => {
+            event.stopPropagation();
+            this.#togglePhaseMenu(this.#node.phaseMenu.hidden);
+        });
+        this.#node.phaseMenu.addEventListener('click', event => {
+            const option = event.target.closest('button')?.dataset.option;
+            if (!option) return;
+            this.#togglePhaseMenu(false);
             const room = this.#resolve(this.#config.rooms[this.#room] || {});
             if (room.phase) {
                 this.#hass.callService('select', 'select_option', {
                     entity_id: room.phase,
-                    option: event.target.value,
+                    option,
                 });
             }
         });
+        this.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !this.#node.phaseMenu.hidden) {
+                this.#togglePhaseMenu(false);
+                this.#node.phaseChip.focus();
+            }
+        });
+    }
+
+    /* Um clique em qualquer outro lugar fecha o menu - inclusive fora do card,
+       dai o ouvinte no documento enquanto ele esta aberto. */
+    #togglePhaseMenu(open) {
+        this.#node.phaseMenu.hidden = !open;
+        this.#node.phaseChip.setAttribute('aria-expanded', String(open));
+        if (open) {
+            this.#closePhaseMenu ??= () => this.#togglePhaseMenu(false);
+            document.addEventListener('click', this.#closePhaseMenu);
+        } else if (this.#closePhaseMenu) {
+            document.removeEventListener('click', this.#closePhaseMenu);
+        }
     }
 
     #renderRooms() {
@@ -1022,19 +1076,29 @@ class WeatherScheduleCard extends HTMLElement {
         if (!state) return;
 
         const options = state.attributes.options || [];
-        const select = this.#node.phaseSelect;
-        if (select.dataset.print !== options.join('|')) {
-            select.dataset.print = options.join('|');
-            select.replaceChildren();
+        const menu = this.#node.phaseMenu;
+        const print = [options.join('|'), this.#locale()].join('#');
+        if (menu.dataset.print !== print) {
+            menu.dataset.print = print;
+            menu.replaceChildren();
             for (const option of options) {
-                const node = document.createElement('option');
-                node.value = option;
+                const node = document.createElement('button');
+                node.type = 'button';
+                node.dataset.option = option;
+                node.setAttribute('role', 'option');
                 node.textContent = this.#text.phase[option] || option;
-                select.appendChild(node);
+                menu.appendChild(node);
             }
         }
-        select.value = state.state;
-        select.disabled = state.state === 'unavailable';
+        for (const node of menu.children) {
+            const active = node.dataset.option === state.state;
+            node.classList.toggle('on', active);
+            node.setAttribute('aria-selected', String(active));
+        }
+        this.#node.phaseText.textContent = this.#text.phase[state.state] || state.state;
+        const off = state.state === 'unavailable';
+        this.#node.phaseChip.disabled = off;
+        if (off) this.#togglePhaseMenu(false);
         this.#node.phaseDot.style.background = this.#bandColor(climate.vpd);
     }
 
@@ -1385,6 +1449,8 @@ class WeatherScheduleCard extends HTMLElement {
     }
 
     #leafDrop(room) {
+        // Na secagem não há folha transpirando: o VPD é o do próprio ar.
+        if (this.#state(room.phase)?.state === 'dry') return 0;
         const settings = this.#state(room.status)?.attributes?.settings;
         const stored = Number.parseFloat(settings?.leaf_drop);
         return Number.isFinite(stored) ? stored : Number.parseFloat(room.leaf_drop);
@@ -1602,6 +1668,15 @@ class WeatherScheduleCard extends HTMLElement {
         }
 
         if (spec.isVpd) {
+            if (Number.isFinite(spec.low) && Number.isFinite(spec.high)) {
+                const top = y(spec.high);
+                const bottom = y(spec.low);
+                if (bottom - top > 0) {
+                    svg.appendChild(make('rect', {
+                        x: 0, y: top, width, height: bottom - top, class: 'target-zone',
+                    }));
+                }
+            }
             for (const edge of [spec.low, spec.high]) {
                 if (!Number.isFinite(edge) || edge > ceiling || edge < floor) continue;
                 svg.appendChild(make('line', {

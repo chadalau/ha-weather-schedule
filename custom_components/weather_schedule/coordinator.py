@@ -56,6 +56,7 @@ from .const import (
     DEFAULT_LEAF_DROP,
     DEFAULT_PROFILES,
     DEFAULT_TRIP_MINUTES,
+    PHASE_DRY,
     STARTING_PHASE,
     STATUS_CO2_HIGH,
     STATUS_CO2_LOW,
@@ -214,7 +215,9 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         co2 = self._number_of(self.settings.get(CONF_CARBON_DIOXIDE))
 
         if leaf is None and air is not None:
-            leaf = air - self.leaf_drop
+            # Material colhido não transpira, logo não fica abaixo do ar: na
+            # secagem o VPD é o do próprio ar, e é assim que 60/60 dá 0,7 kPa.
+            leaf = air - (0.0 if self.phase == PHASE_DRY else self.leaf_drop)
 
         climate = RoomClimate(
             air_temperature=air,

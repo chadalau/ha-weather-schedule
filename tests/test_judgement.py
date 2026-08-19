@@ -49,7 +49,7 @@ def test_every_phase_ships_a_complete_and_ordered_window():
 
 def test_reading_inside_the_window_has_no_drift(coordinator, window):
     assert coordinator._drifts_of(
-        climate(vpd=1.1, air_temperature=24.0, relative_humidity=60.0), window
+        climate(vpd=1.1, air_temperature=24.0, relative_humidity=54.0), window
     ) == []
 
 
@@ -65,7 +65,7 @@ def test_reading_inside_the_window_has_no_drift(coordinator, window):
     ],
 )
 def test_each_reading_reports_its_own_drift(coordinator, window, field, value, expected):
-    values = {"vpd": 1.1, "air_temperature": 24.0, "relative_humidity": 60.0}
+    values = {"vpd": 1.1, "air_temperature": 24.0, "relative_humidity": 54.0}
     values[field] = value
     assert expected in coordinator._drifts_of(climate(**values), window)
 
@@ -132,11 +132,13 @@ def test_carbon_dioxide_alone_is_enough_to_leave_on_target(coordinator, hass):
 
 
 def test_phase_change_swaps_the_whole_window(coordinator):
+    """Floração tardia pede sala mais seca, mais fria e com mais déficit."""
     veg = coordinator.bounds
     coordinator.phase = "flower_late"
     flower = coordinator.bounds
-    assert veg["vpd_max"] < flower["vpd_min"]
+    assert flower["vpd_min"] > veg["vpd_min"]
     assert flower["rh_max"] < veg["rh_max"]
+    assert flower["temp_max"] < veg["temp_max"]
 
 
 def test_room_overrides_beat_the_default_profile(coordinator):
@@ -145,3 +147,41 @@ def test_room_overrides_beat_the_default_profile(coordinator):
     assert window["vpd_min"] == 0.9 and window["vpd_max"] == 1.4
     # o que não foi sobrescrito continua vindo do padrão
     assert window["temp_min"] == DEFAULT_PROFILES["veg_late"]["temp_min"]
+
+
+@pytest.mark.parametrize("phase", PHASES)
+def test_each_phase_window_is_internally_reachable(phase):
+    """As três janelas têm que descrever a mesma sala.
+
+    Declarar VPD, temperatura e umidade à toa deixa a sala em desvio
+    permanente: obedecer uma quebra a outra. O centro da caixa temperatura/UR
+    precisa cair dentro da janela de VPD da própria fase.
+    """
+    from custom_components.weather_schedule import psychrometrics as psy
+    from custom_components.weather_schedule.const import PHASE_DRY
+
+    profile = DEFAULT_PROFILES[phase]
+    air = (profile["temp_min"] + profile["temp_max"]) / 2
+    humidity = (profile["rh_min"] + profile["rh_max"]) / 2
+    # Material colhido não transpira: na secagem a folha está na temperatura do ar.
+    leaf = air if phase == PHASE_DRY else air - 2
+
+    vpd = psy.vapour_pressure_deficit(leaf, air, humidity)
+
+    assert profile["vpd_min"] <= vpd <= profile["vpd_max"], (
+        f"{phase}: a caixa temp/UR gera {vpd:.2f} kPa, fora de "
+        f"{profile['vpd_min']}-{profile['vpd_max']}"
+    )
+
+
+def test_drying_reads_the_air_without_a_leaf_gap(coordinator, hass):
+    """A regra 60/60 vale 0,7 kPa; com desconto de folha viraria 0,5."""
+    coordinator.phase = "dry"
+    hass.states.set("sensor.air", "15.5", unit_of_measurement="°C")
+    hass.states.set("sensor.humidity", "60", unit_of_measurement="%")
+
+    climate_now = coordinator._read_room()
+
+    assert climate_now.leaf_temperature == pytest.approx(15.5)
+    assert climate_now.vpd == pytest.approx(0.70, abs=0.02)
+    assert STATUS_VPD_LOW not in climate_now.drifts
