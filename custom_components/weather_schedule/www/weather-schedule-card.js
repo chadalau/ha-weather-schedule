@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.2.2';
+const VERSION = '1.2.3';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -1669,11 +1669,15 @@ class WeatherScheduleCard extends HTMLElement {
         // A escala fecha no degrau logo acima do pior eixo: com o dia todo em
         // 5% de desvio, uma escala de 100% desenharia um ponto.
         const scale = [10, 25, 50, 100].find(step => worst <= step) || 100;
-        const at = (index, value) => {
-            const angle = (Math.PI * 2 * index) / DRIFT_AXES.length - Math.PI / 2;
-            const distance = hole + (Math.min(value, scale) / scale) * (radius - hole);
+        const angleOf = index => (Math.PI * 2 * index) / DRIFT_AXES.length - Math.PI / 2;
+        const pointAt = (index, distance) => {
+            const angle = angleOf(index);
             return [cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance];
         };
+        // Posicao de um valor no eixo: presa entre o furo e o anel externo.
+        const at = (index, value) => pointAt(
+            index, hole + (Math.min(value, scale) / scale) * (radius - hole),
+        );
 
         for (const step of [0, 0.25, 0.5, 0.75, 1]) {
             const corners = share.axes.map((_, index) => at(index, scale * step));
@@ -1698,7 +1702,14 @@ class WeatherScheduleCard extends HTMLElement {
         });
 
         share.axes.forEach((axis, index) => {
-            const [x, y] = at(index, scale * 1.34);
+            // O rotulo mora fora do anel, e nao preso nele: em cima e embaixo
+            // ele e uma pilha de duas linhas, entao pede mais folga que os
+            // lados, onde o texto cresce para longe do desenho.
+            const angle = angleOf(index);
+            const upright = Math.abs(Math.cos(angle)) < 0.2;
+            const sideways = Math.abs(Math.sin(angle)) < 0.2;
+            const gap = upright ? 38 : sideways ? 22 : 30;
+            const [x, y] = pointAt(index, radius + gap);
             const middle = Math.abs(x - cx) < 6;
             const anchor = middle ? 'middle' : x > cx ? 'start' : 'end';
             const name = make('text', {x: x.toFixed(1), y: (y - 6).toFixed(1), class: 'axis-name', 'text-anchor': anchor});
