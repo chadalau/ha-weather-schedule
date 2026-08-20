@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.3.2';
+const VERSION = '1.4.0';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -39,6 +39,7 @@ const TEXT = {
         phase: {propagation: 'Propagation', veg_early: 'Early vegetative', veg_late: 'Late vegetative', flower_early: 'Early flower', flower_late: 'Late flower', dry: 'Drying'},
         status: {on_target: 'On target', vpd_low: 'VPD low', vpd_high: 'VPD high', too_cold: 'Too cold', too_warm: 'Too warm', too_dry: 'Too dry', too_humid: 'Too humid', co2_low: 'CO₂ low', co2_high: 'CO₂ high'},
         dayTitle: 'How the day went', inRange: 'on target', noReading: 'no reading',
+        lightsOff: 'lights off', darkNoTarget: 'no target in the dark',
         driftShare: 'the day split between what pulled the room off target', outerRing: 'outer ring',
         temperature: 'Temperature', humidity: 'Humidity', co2: 'CO₂', dewPoint: 'Dew point',
         dewPointShort: 'Dew point',
@@ -63,6 +64,7 @@ const TEXT = {
         phase: {propagation: 'Propagação', veg_early: 'Vegetativo inicial', veg_late: 'Vegetativo tardio', flower_early: 'Floração inicial', flower_late: 'Floração tardia', dry: 'Secagem'},
         status: {on_target: 'Na faixa', vpd_low: 'VPD baixo', vpd_high: 'VPD alto', too_cold: 'Frio demais', too_warm: 'Quente demais', too_dry: 'Seco demais', too_humid: 'Úmido demais', co2_low: 'CO₂ baixo', co2_high: 'CO₂ alto'},
         dayTitle: 'Como foi o dia', inRange: 'na faixa', noReading: 'sem leitura',
+        lightsOff: 'luz apagada', darkNoTarget: 'sem alvo no escuro',
         driftShare: 'o dia repartido entre o que tirou a sala da faixa', outerRing: 'anel externo',
         temperature: 'Temperatura', humidity: 'Umidade', co2: 'CO₂', dewPoint: 'Ponto de orvalho',
         dewPointShort: 'P. de orvalho',
@@ -301,6 +303,8 @@ svg.chart { display: block; width: 100%; height: auto; border-radius: 10px; }
 /* A estrela do dia. Poligono pequeno e dia bom: cada ponta e o tempo que a
    sala passou naquele desvio. */
 .chip.status { appearance: none; cursor: pointer; font: inherit; }
+/* A lua diz que a sala esta no escuro - e por isso que o CO2 sumiu do alvo. */
+.chip.night { padding: 0 9px; color: var(--secondary-text-color); --mdc-icon-size: 17px; }
 .chip.status:hover { border-color: var(--ws-teal); }
 dialog.dial { border: 1px solid var(--divider-color); border-radius: 14px; padding: 0;
   width: min(520px, 94vw); background: var(--card-background-color); color: var(--primary-text-color); }
@@ -931,6 +935,12 @@ class WeatherScheduleCard extends HTMLElement {
         return bounds;
     }
 
+    /* A sala esta com a luz acesa? Integracao antiga nao diz, e antes deste
+       campo existir toda sala era tratada como sempre iluminada. */
+    #isDaytime(room) {
+        return this.#state(room.status)?.attributes?.daytime !== false;
+    }
+
     /* Os sensores de um papel, quando a integracao publicou a lista. */
     #sensorsOf(room, role) {
         const list = this.#state(room.status)?.attributes?.sensors?.[role];
@@ -995,6 +1005,7 @@ class WeatherScheduleCard extends HTMLElement {
                 <div class="header-left">
                     <div class="rooms" role="group"></div>
                     <button type="button" class="chip status" hidden><span class="dot"></span><span class="status-text"></span></button>
+                    <span class="chip night" hidden><ha-icon icon="mdi:weather-night"></ha-icon></span>
                 </div>
                 <div class="header-right">
                     <div class="phase-wrap" hidden>
@@ -1076,6 +1087,7 @@ class WeatherScheduleCard extends HTMLElement {
             tiles: card.querySelector('.tiles'),
             chartWrap: card.querySelector('.chart-wrap'),
             status: card.querySelector('.chip.status'),
+            night: card.querySelector('.chip.night'),
             statusText: card.querySelector('.status-text'),
             chart: card.querySelector('svg.chart'),
             tip: card.querySelector('.tip'),
@@ -1246,6 +1258,9 @@ class WeatherScheduleCard extends HTMLElement {
         if (!known) return;
         chip.classList.toggle('drift', status.state !== 'on_target');
         this.#node.statusText.textContent = this.#text.status[status.state] || status.state;
+        // A lua aparece quando a sala esta no escuro, ao lado do status.
+        this.#node.night.hidden = this.#isDaytime(room);
+        this.#node.night.title = this.#text.lightsOff;
     }
 
     #renderTiles(room, climate, bounds) {
@@ -1265,9 +1280,14 @@ class WeatherScheduleCard extends HTMLElement {
             },
         ];
         if (Number.isFinite(climate.co2)) {
+            // Sem luz nao ha fotossintese, entao nao ha alvo de CO2 a mostrar.
+            const day = this.#isDaytime(room);
             tiles.push({
                 key: 'co2', label: text.co2, value: climate.co2, unit: 'ppm', digits: 0,
-                min: bounds.co2_min, max: bounds.co2_max, scale: [400, 1600], entity: room.co2,
+                min: day ? bounds.co2_min : undefined,
+                max: day ? bounds.co2_max : undefined,
+                scale: [400, 1600], entity: room.co2,
+                note: day ? '' : text.darkNoTarget,
             });
         }
         if (Number.isFinite(climate.dew)) {

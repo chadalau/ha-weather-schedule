@@ -32,7 +32,8 @@
           "sensors": "Sensors",
           "phase": "Target windows",
           "alert": "Alert and CO₂",
-          "fans": "Fans"
+          "fans": "Fans",
+          "cycle": "Light cycle"
         }
       },
       "sensors": {
@@ -82,6 +83,15 @@
         "title": "Fans",
         "data": {
           "fans": "Fans of this room"
+        }
+      },
+      "cycle": {
+        "title": "Light cycle",
+        "description": "The cycle is a schedule, not a switch: it says what the grow intends. With the lights off there is no photosynthesis, so CO₂ stops being judged, and the leaf gap becomes the smaller one radiation alone produces.",
+        "data": {
+          "lights_on": "Lights on at",
+          "light_hours": "Hours of light (24 = never dark)",
+          "night_leaf_drop": "Leaf colder than air, in the dark"
         }
       }
     },

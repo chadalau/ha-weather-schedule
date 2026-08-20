@@ -199,6 +199,30 @@ The CO₂ windows assume an enriched room. A room without injection sits at
 ambient CO₂, so tick **Room is not CO₂ enriched** under Configure → Alert and
 CO₂; readings under the window then stop being reported as off target.
 
+## The light cycle
+
+Configure → **Light cycle** takes an hour and a length: lights on at 18:00 for 18
+hours, say. It is a schedule rather than an entity on purpose — a schedule says
+what the grow intends, while a relay can be flipped by hand at three in the
+morning without the night having ended. The default is 24 hours of light, which
+means "this room never gets dark" and judges it exactly as before.
+
+Two things change once the room knows it is dark:
+
+**CO₂ leaves the judgement.** Without light there is no photosynthesis, so the
+phase's CO₂ window does not apply; `sensor.<room>_co2_status` goes unknown and no
+CO₂ drift is raised. The card drops the target band from the CO₂ tile and marks
+it *no target in the dark*.
+
+**The leaf gap shrinks.** Under the lamps the leaf sits below air temperature
+because transpiration cools it; in the dark the stomata are shut, but the leaf
+still loses heat by radiation — field measurements put it 1–3 °C under the air.
+So the room keeps a separate, smaller gap for the dark, 1 °C by default. Drying
+still uses none, at any hour.
+
+The room also wakes itself at the moment the lights flip, instead of waiting for
+the next sensor to report.
+
 ## The alert
 
 `binary_sensor.<room>_alert` turns on only after the room has been off target

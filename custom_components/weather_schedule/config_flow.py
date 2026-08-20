@@ -38,12 +38,18 @@ from .const import (
     CONF_FAN_POWERS,
     CONF_FANS,
     CONF_LEAF_DROP,
+    CONF_LIGHT_HOURS,
+    CONF_LIGHTS_ON,
+    CONF_NIGHT_LEAF_DROP,
     CONF_LEAF_SENSOR,
     CONF_PROFILES,
     CONF_RELATIVE_HUMIDITY,
     CONF_TRIP_MINUTES,
     DEFAULT_CLEAR_MINUTES,
     DEFAULT_LEAF_DROP,
+    DEFAULT_LIGHT_HOURS,
+    DEFAULT_LIGHTS_ON,
+    DEFAULT_NIGHT_LEAF_DROP,
     DEFAULT_PROFILES,
     DEFAULT_TRIP_MINUTES,
     DOMAIN,
@@ -216,7 +222,46 @@ class WeatherScheduleOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Ask what to edit."""
         return self.async_show_menu(
-            step_id="init", menu_options=["sensors", "fans", "phase", "alert"]
+            step_id="init",
+            menu_options=["sensors", "fans", "cycle", "phase", "alert"],
+        )
+
+    async def async_step_cycle(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set the room's light cycle, and what the dark changes."""
+        if user_input is not None:
+            return self._store(
+                {
+                    CONF_LIGHTS_ON: user_input[CONF_LIGHTS_ON],
+                    CONF_LIGHT_HOURS: user_input[CONF_LIGHT_HOURS],
+                    CONF_NIGHT_LEAF_DROP: user_input[CONF_NIGHT_LEAF_DROP],
+                }
+            )
+
+        current = self._current
+        return self.async_show_form(
+            step_id="cycle",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_LIGHTS_ON,
+                        default=current.get(CONF_LIGHTS_ON, DEFAULT_LIGHTS_ON),
+                    ): selector.TimeSelector(),
+                    # Vinte e quatro horas dizem "esta sala nunca escurece", que
+                    # e como toda sala era julgada antes deste passo existir.
+                    vol.Required(
+                        CONF_LIGHT_HOURS,
+                        default=current.get(CONF_LIGHT_HOURS, DEFAULT_LIGHT_HOURS),
+                    ): _number_box(0, 24, 0.5, "h"),
+                    vol.Required(
+                        CONF_NIGHT_LEAF_DROP,
+                        default=current.get(
+                            CONF_NIGHT_LEAF_DROP, DEFAULT_NIGHT_LEAF_DROP
+                        ),
+                    ): _number_box(0, LEAF_DROP_CEILING, 0.1, "°C"),
+                }
+            ),
         )
 
     async def async_step_sensors(

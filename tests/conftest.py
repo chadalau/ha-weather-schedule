@@ -86,6 +86,8 @@ def coordinator(hass: FakeHass, _fake_scheduling):
     room._drifting_since = None
     room._settled_since = None
     room._cancel_timer = None
+    room._cancel_light_flip = None
+    room._light_flip_at = None
     room._warned = set()
     hass.states.set("sensor.air", "24.0", unit_of_measurement="°C")
     hass.states.set("sensor.humidity", "60.0", unit_of_measurement="%")

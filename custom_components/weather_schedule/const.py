@@ -7,7 +7,7 @@ from typing import Final
 DOMAIN: Final = "weather_schedule"
 
 # Keep in sync with manifest.json: it also busts the browser cache of the card.
-VERSION: Final = "1.3.2"
+VERSION: Final = "1.4.0"
 
 CARD_URL_PATH: Final = "/weather_schedule_card"
 CARD_FILENAME: Final = "weather-schedule-card.js"
@@ -20,6 +20,9 @@ CONF_CARBON_DIOXIDE: Final = "carbon_dioxide"
 CONF_LEAF_DROP: Final = "leaf_drop"
 CONF_PROFILES: Final = "profiles"
 CONF_AMBIENT_CO2: Final = "ambient_co2"
+CONF_LIGHTS_ON: Final = "lights_on"
+CONF_LIGHT_HOURS: Final = "light_hours"
+CONF_NIGHT_LEAF_DROP: Final = "night_leaf_drop"
 CONF_TRIP_MINUTES: Final = "trip_minutes"
 CONF_FANS: Final = "fans"
 CONF_FAN_NAMES: Final = "fan_names"
@@ -38,6 +41,13 @@ CONF_CLEAR_MINUTES: Final = "clear_minutes"
 
 # How much colder the leaf runs than the air when there is no infrared sensor.
 DEFAULT_LEAF_DROP: Final = 2.0
+# Vinte e quatro horas de luz e o mesmo que nao ter ciclo: uma sala
+# que nunca escurece e julgada como sempre foi.
+DEFAULT_LIGHTS_ON: Final = "06:00:00"
+DEFAULT_LIGHT_HOURS: Final = 24.0
+# No escuro nao ha transpiracao esfriando a folha, mas ha perda por
+# radiacao: medidas de campo poem a folha 1 a 3 graus abaixo do ar.
+DEFAULT_NIGHT_LEAF_DROP: Final = 1.0
 LEAF_DROP_CEILING: Final = 6.0
 
 # The alert waits this long before it believes what it sees, in either direction.

@@ -34,6 +34,9 @@ class RoomSensorDescription(SensorEntityDescription):
     reading: Callable[[RoomClimate], float | str | None]
     extras: Callable[[RoomCoordinator], dict[str, Any]] | None = None
     wanted: Callable[[RoomCoordinator], bool] = lambda _: True
+    # Uma leitura que existe mas não se aplica agora vale `unknown`, não
+    # `unavailable`: a entidade não quebrou, é a pergunta que não cabe.
+    present: Callable[[RoomCoordinator], bool] | None = None
 
 
 SENSORS: tuple[RoomSensorDescription, ...] = (
@@ -98,6 +101,7 @@ SENSORS: tuple[RoomSensorDescription, ...] = (
             # repeat the entity ids in YAML.
             "sources": coordinator.sources,
             "sensors": coordinator.sensors,
+            "daytime": coordinator.data.daytime,
             "settings": coordinator.tunables,
             "fans": coordinator.fans,
             "cycles": coordinator.cycles.status if coordinator.cycles else {},
@@ -107,6 +111,9 @@ SENSORS: tuple[RoomSensorDescription, ...] = (
     RoomSensorDescription(
         key="carbon_dioxide_status",
         translation_key="carbon_dioxide_status",
+        # A sala tem sensor de CO2: no escuro a janela é que não se aplica, e
+        # a entidade fica sem valor em vez de fingir que sumiu.
+        present=lambda coordinator: coordinator.tracks_carbon_dioxide,
         device_class=SensorDeviceClass.ENUM,
         options=list(CO2_STATUSES),
         reading=lambda climate: climate.carbon_dioxide_status,
@@ -159,4 +166,8 @@ class RoomSensor(RoomEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return whether this reading can be calculated at all right now."""
+        if self.entity_description.present is not None:
+            return super().available and self.entity_description.present(
+                self.coordinator
+            )
         return super().available and self.native_value is not None

@@ -26,6 +26,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 from homeassistant.util.dt import utcnow
 from homeassistant.util.unit_conversion import TemperatureConverter
 
@@ -49,11 +50,17 @@ from .const import (
     CONF_FANS,
     CONF_LEAF_DROP,
     CONF_LEAF_SENSOR,
+    CONF_LIGHT_HOURS,
+    CONF_LIGHTS_ON,
+    CONF_NIGHT_LEAF_DROP,
     CONF_PROFILES,
     CONF_RELATIVE_HUMIDITY,
     CONF_TRIP_MINUTES,
     DEFAULT_CLEAR_MINUTES,
     DEFAULT_LEAF_DROP,
+    DEFAULT_LIGHT_HOURS,
+    DEFAULT_LIGHTS_ON,
+    DEFAULT_NIGHT_LEAF_DROP,
     DEFAULT_PROFILES,
     DEFAULT_TRIP_MINUTES,
     PHASE_DRY,
@@ -96,6 +103,7 @@ class RoomClimate:
     # Falso quando falta alguma leitura obrigatória: sem isso, uma sala cega
     # passaria por sala saudável.
     readable: bool = True
+    daytime: bool = True
 
 
 class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
@@ -108,6 +116,8 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Set up the coordinator for one configured room."""
         super().__init__(hass, _LOGGER, name=entry.title, config_entry=entry)
+        self._cancel_light_flip: CALLBACK_TYPE | None = None
+        self._light_flip_at: datetime | None = None
         self.settings = {**entry.data, **entry.options}
         self.phase = STARTING_PHASE
         self.leaf_drop = float(self.settings.get(CONF_LEAF_DROP, DEFAULT_LEAF_DROP))
@@ -122,6 +132,94 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
     def tracks_carbon_dioxide(self) -> bool:
         """Return whether a CO2 sensor was configured for this room."""
         return bool(self.settings.get(CONF_CARBON_DIOXIDE))
+
+    @property
+    def is_daytime(self) -> bool:
+        """Return whether the room's lights are on right now.
+
+        The cycle is a schedule, not an entity: it describes what the grow
+        intends, which is what the plant lives by. A relay can be flipped by
+        hand at three in the morning without the night having ended.
+        """
+        hours = float(self.settings.get(CONF_LIGHT_HOURS, DEFAULT_LIGHT_HOURS))
+        if hours >= 24:
+            return True
+        if hours <= 0:
+            return False
+        start = dt_util.parse_time(
+            str(self.settings.get(CONF_LIGHTS_ON, DEFAULT_LIGHTS_ON))
+        ) or dt_util.parse_time(DEFAULT_LIGHTS_ON)
+        now = dt_util.now()
+        # Minutos desde que a luz acendeu, dando a volta na meia-noite.
+        since = (
+            (now.hour * 60 + now.minute + now.second / 60)
+            - (start.hour * 60 + start.minute)
+        ) % (24 * 60)
+        return since < hours * 60
+
+    @property
+    def effective_leaf_drop(self) -> float:
+        """Return how far below the air the leaf sits, right now.
+
+        Under the lamps it is transpiration doing the cooling; in the dark it
+        is radiation, and the gap shrinks but does not close. Drying has no
+        leaf to cool at all.
+        """
+        if self.phase == PHASE_DRY:
+            return 0.0
+        if self.is_daytime:
+            return self.leaf_drop
+        return float(
+            self.settings.get(CONF_NIGHT_LEAF_DROP, DEFAULT_NIGHT_LEAF_DROP)
+        )
+
+    def _next_light_change(self) -> datetime | None:
+        """Return when the lights next flip, so the room notices on its own."""
+        hours = float(self.settings.get(CONF_LIGHT_HOURS, DEFAULT_LIGHT_HOURS))
+        if hours >= 24 or hours <= 0:
+            return None
+        start = dt_util.parse_time(
+            str(self.settings.get(CONF_LIGHTS_ON, DEFAULT_LIGHTS_ON))
+        ) or dt_util.parse_time(DEFAULT_LIGHTS_ON)
+        now = dt_util.now()
+        dawn = now.replace(
+            hour=start.hour, minute=start.minute, second=0, microsecond=0
+        )
+        marks = [
+            dawn + timedelta(days=day) + timedelta(hours=hours * step)
+            for day in (-1, 0, 1)
+            for step in (0, 1)
+        ]
+        upcoming = sorted(mark for mark in marks if mark > now)
+        return dt_util.as_utc(upcoming[0]) if upcoming else None
+
+    @callback
+    def _cancel_light_timer(self) -> None:
+        """Drop the pending lights-flip wake-up, if there is one."""
+        if self._cancel_light_flip is not None:
+            self._cancel_light_flip()
+            self._cancel_light_flip = None
+        self._light_flip_at = None
+
+    @callback
+    def _watch_light_cycle(self) -> None:
+        """Refresh the room when the lights are due to flip."""
+        when = self._next_light_change()
+        if when is None or when == self._light_flip_at:
+            return
+        if self._cancel_light_flip is not None:
+            self._cancel_light_flip()
+        self._light_flip_at = when
+
+        @callback
+        def flipped(_now: datetime) -> None:
+            self._cancel_light_flip = None
+            self._light_flip_at = None
+            self.async_set_updated_data(self._read_room())
+
+        self._cancel_light_flip = async_track_point_in_utc_time(
+            self.hass, flipped, when
+        )
 
     def _entities(self, key: str) -> list[str]:
         """Return every entity configured for a reading.
@@ -177,6 +275,13 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         """Return the settings a user may want to change without a reload."""
         return {
             CONF_LEAF_DROP: self.leaf_drop,
+            CONF_LIGHTS_ON: str(self.settings.get(CONF_LIGHTS_ON, DEFAULT_LIGHTS_ON)),
+            CONF_LIGHT_HOURS: float(
+                self.settings.get(CONF_LIGHT_HOURS, DEFAULT_LIGHT_HOURS)
+            ),
+            CONF_NIGHT_LEAF_DROP: float(
+                self.settings.get(CONF_NIGHT_LEAF_DROP, DEFAULT_NIGHT_LEAF_DROP)
+            ),
             CONF_TRIP_MINUTES: float(
                 self.settings.get(CONF_TRIP_MINUTES, DEFAULT_TRIP_MINUTES)
             ),
@@ -212,6 +317,7 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
             async_track_state_change_event(self.hass, watched, self._sensor_reported)
         )
         self.config_entry.async_on_unload(self._cancel_alert_timer)
+        self.config_entry.async_on_unload(self._cancel_light_timer)
 
     @callback
     def async_change_phase(self, phase: str) -> None:
@@ -256,10 +362,11 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         leaf = _mean(leaves)
         co2 = _mean(co2s)
 
+        self._watch_light_cycle()
         if leaf is None and air is not None:
             # Material colhido não transpira, logo não fica abaixo do ar: na
             # secagem o VPD é o do próprio ar, e é assim que 60/60 dá 0,7 kPa.
-            leaf = air - (0.0 if self.phase == PHASE_DRY else self.leaf_drop)
+            leaf = air - self.effective_leaf_drop
 
         climate = RoomClimate(
             air_temperature=air,
@@ -286,7 +393,7 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
                 if len(airs) == len(humidities) and len(airs) > 1
                 else [(air, humidity)]
             )
-            drop = 0.0 if self.phase == PHASE_DRY else self.leaf_drop
+            drop = self.effective_leaf_drop
             climate.dew_point = _mean(
                 [psychrometrics.dew_point(t, rh) for t, rh in pairs]
             )
@@ -314,8 +421,13 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
                 )
 
         window = self.bounds
+        climate.daytime = self.is_daytime
         climate.drifts = self._drifts_of(climate, window)
-        climate.carbon_dioxide_status = self._carbon_dioxide_status(co2, window)
+        # Sem luz não há fotossíntese, então não há alvo de CO2 a cobrar: a
+        # janela é de dia, e cobrá-la de madrugada é alarme sobre nada.
+        climate.carbon_dioxide_status = (
+            self._carbon_dioxide_status(co2, window) if climate.daytime else None
+        )
         # O CO2 faz parte da janela da fase, então também faz parte do desvio:
         # um alerta que ignora metade do que promete julgar não serve.
         if climate.carbon_dioxide_status == CO2_UNDER:

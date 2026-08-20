@@ -32,7 +32,8 @@
           "sensors": "Sensores",
           "phase": "Faixas-alvo",
           "alert": "Alerta e CO₂",
-          "fans": "Ventiladores"
+          "fans": "Ventiladores",
+          "cycle": "Ciclo de luz"
         }
       },
       "sensors": {
@@ -82,6 +83,15 @@
         "title": "Ventiladores",
         "data": {
           "fans": "Ventiladores desta sala"
+        }
+      },
+      "cycle": {
+        "title": "Ciclo de luz",
+        "description": "O ciclo é um horário, não um interruptor: ele diz o que o cultivo pretende. Com a luz apagada não há fotossíntese, então o CO₂ deixa de ser cobrado, e o desconto de folha passa a ser o menor, o que a radiação sozinha produz.",
+        "data": {
+          "lights_on": "Luz acende às",
+          "light_hours": "Horas de luz (24 = nunca escurece)",
+          "night_leaf_drop": "Folha mais fria que o ar, no escuro"
         }
       }
     },
