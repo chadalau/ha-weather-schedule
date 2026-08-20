@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -2030,12 +2030,24 @@ class WeatherScheduleCard extends HTMLElement {
         svg.hidden = points.length === 0;
         if (!points.length) return;
 
+        // As linhas de cada sensor abrem mais que a media - e a media que
+        // fica no meio delas. Se a escala olhasse so a principal, as sondas
+        // seriam achatadas contra a borda do quadro.
+        const ghostLines = (ghosts || [])
+            .map(line => (line || [])
+                .filter(point => point.time >= start && Number.isFinite(point.value))
+                .sort((a, b) => a.time - b.time))
+            .filter(line => line.length > 1);
+
         const width = 720;
         const height = target.height ?? 300;
         const pad = {left: 8, right: 8, top: target.headroom ?? 16, bottom: 34};
         const plotWidth = width - pad.left - pad.right;
         const plotHeight = height - pad.top - pad.bottom;
-        const values = points.map(point => point.value);
+        const values = [
+            ...points.map(point => point.value),
+            ...ghostLines.flatMap(line => line.map(point => point.value)),
+        ];
         const make = (tag, attributes) => {
             const node = document.createElementNS(SVG_NS, tag);
             for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
@@ -2158,11 +2170,7 @@ class WeatherScheduleCard extends HTMLElement {
             .map((point, index) => `${index ? 'L' : 'M'} ${x(point.time).toFixed(1)} ${y(point.value).toFixed(1)}`)
             .join(' ');
 
-        for (const ghost of ghosts) {
-            const line = (ghost || [])
-                .filter(point => point.time >= start && Number.isFinite(point.value))
-                .sort((a, b) => a.time - b.time);
-            if (line.length < 2) continue;
+        for (const line of ghostLines) {
             svg.appendChild(make('path', {d: trace(line), class: 'ghost'}));
         }
 
