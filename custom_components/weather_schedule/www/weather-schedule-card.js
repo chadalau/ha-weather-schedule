@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.2.3';
+const VERSION = '1.3.0';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -45,13 +45,13 @@ const TEXT = {
         fans: 'Fans', on: 'On', off: 'Off', unavailable: 'Unavailable',
         target: 'target', margin: 'margin', noHistory: 'No history yet', noRooms: 'Add a room to this card',
         settings: 'Room settings', sensorsGroup: 'Sensors', paramsGroup: 'Parameters',
-        leafSensor: 'Leaf (infrared)', leafDrop: 'Leaf colder than air', tripMinutes: 'Off target before alerting',
+        leafSensor: 'Leaf (infrared)', another: 'another sensor', leafDrop: 'Leaf colder than air', tripMinutes: 'Off target before alerting',
         clearMinutes: 'On target before clearing', ambientCo2: 'Room is not CO₂ enriched',
         none: '— none —', save: 'Save', cancel: 'Cancel', saving: 'Saving…', saved: 'Saved',
         saveFailed: 'Could not save', noEntry: 'Name a status sensor of the integration to edit settings here.',
         now: 'now', lowest: 'low', highest: 'high',
         addFan: 'Add fan', fanName: 'Name', fanSearch: 'Search entity…', removeFan: 'Remove',
-        duplicateFan: 'The same fan is listed twice.',
+        duplicateFan: 'The same fan is listed twice.', needSensor: 'A room needs a temperature and a humidity sensor.',
         power: 'Power', powerSearch: 'Power sensor (optional)',
         openHistory: 'Open history', close: 'Close',
         cyclePattern: [' cycle: ', ' min on, ', ' min off'], paused: 'timer paused',
@@ -69,13 +69,13 @@ const TEXT = {
         fans: 'Ventiladores', on: 'Ligado', off: 'Desligado', unavailable: 'Indisponível',
         target: 'alvo', margin: 'margem', noHistory: 'Ainda sem histórico', noRooms: 'Adicione uma sala a este card',
         settings: 'Ajustes da sala', sensorsGroup: 'Sensores', paramsGroup: 'Parâmetros',
-        leafSensor: 'Folha (infravermelho)', leafDrop: 'Folha mais fria que o ar', tripMinutes: 'Fora da faixa antes de alertar',
+        leafSensor: 'Folha (infravermelho)', another: 'outro sensor', leafDrop: 'Folha mais fria que o ar', tripMinutes: 'Fora da faixa antes de alertar',
         clearMinutes: 'Na faixa antes de desligar', ambientCo2: 'Sala sem enriquecimento de CO₂',
         none: '— nenhum —', save: 'Salvar', cancel: 'Cancelar', saving: 'Salvando…', saved: 'Salvo',
         saveFailed: 'Não consegui salvar', noEntry: 'Informe um sensor de status da integração para ajustar por aqui.',
         now: 'agora', lowest: 'mín', highest: 'máx',
         addFan: 'Adicionar ventilador', fanName: 'Nome', fanSearch: 'Buscar entidade…', removeFan: 'Remover',
-        duplicateFan: 'O mesmo ventilador aparece duas vezes.',
+        duplicateFan: 'O mesmo ventilador aparece duas vezes.', needSensor: 'A sala precisa de um sensor de temperatura e um de umidade.',
         power: 'Potência', powerSearch: 'Sensor de potência (opcional)',
         openHistory: 'Abrir histórico', close: 'Fechar',
         cyclePattern: [' ciclo: ', ' min ligado, ', ' min desligado'], paused: 'timer pausado',
@@ -284,6 +284,10 @@ svg.chart { display: block; width: 100%; height: auto; border-radius: 10px; }
 .tick { fill: var(--secondary-text-color); font-size: 11px; }
 .band-label { fill: var(--primary-text-color); font-size: 12px; font-weight: 500; }
 .trend { fill: none; stroke: var(--primary-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+/* Cada sensor por tras da media: fino e apagado, para mostrar a dispersao
+   sem disputar a leitura com a linha que manda. */
+.ghost { fill: none; stroke: var(--primary-color); stroke-width: 1.25; opacity: .34;
+  stroke-linecap: round; stroke-linejoin: round; }
 /* A janela-alvo e a referencia que se le primeiro no grafico: linha grossa,
    traco longo e um claredo entre as duas, para ela nao se perder no meio das
    bandas de fase que ficam atras. */
@@ -582,6 +586,25 @@ class WeatherScheduleCard extends HTMLElement {
         return row;
     }
 
+    /* Temperatura e umidade aceitam mais de um sensor: um seletor por
+       sensor ja escolhido, mais um vazio para somar outro. Esvaziar um
+       seletor tira aquele sensor da sala. */
+    #multiSelectField(field, label, deviceClass, chosen) {
+        const picked = (Array.isArray(chosen) ? chosen : [chosen]).filter(Boolean);
+        const rows = document.createDocumentFragment();
+        [...picked, ''].forEach((entityId, index) => {
+            const first = index === 0;
+            rows.appendChild(this.#selectField(
+                field,
+                first ? label : `${label} · ${this.#text.another}`,
+                deviceClass,
+                entityId,
+                false,
+            ));
+        });
+        return rows;
+    }
+
     #selectField(field, label, deviceClass, current, required) {
         const row = this.#field(label);
         const select = document.createElement('select');
@@ -638,6 +661,7 @@ class WeatherScheduleCard extends HTMLElement {
         const text = this.#text;
         const attributes = this.#state(room.status)?.attributes || {};
         const sources = attributes.sources || {};
+        const lists = attributes.sensors || {};
         const settings = attributes.settings || {};
 
         this.#node.sheetTitle.textContent = room.name ? `${text.settings} · ${room.name}` : text.settings;
@@ -655,8 +679,8 @@ class WeatherScheduleCard extends HTMLElement {
 
         this.#node.sheetSensors.replaceChildren(
             this.#groupTitle(text.sensorsGroup),
-            this.#selectField('air_temperature', text.temperature, 'temperature', sources.air_temperature, true),
-            this.#selectField('relative_humidity', text.humidity, 'humidity', sources.relative_humidity, true),
+            this.#multiSelectField('air_temperature', text.temperature, 'temperature', lists.air_temperature ?? sources.air_temperature),
+            this.#multiSelectField('relative_humidity', text.humidity, 'humidity', lists.relative_humidity ?? sources.relative_humidity),
             this.#selectField('carbon_dioxide', text.co2, 'carbon_dioxide', sources.carbon_dioxide, false),
             this.#selectField('leaf_sensor', text.leafSensor, 'temperature', sources.leaf_sensor, false),
         );
@@ -793,11 +817,23 @@ class WeatherScheduleCard extends HTMLElement {
         if (!entry) return;
 
         const field = name => this.#node.sheet.querySelector(`[data-field="${name}"]`);
+        // Um papel pode ter varios seletores; o que vale sao os preenchidos,
+        // sem repetir o mesmo sensor duas vezes.
+        const picked = name => [...new Set(
+            [...this.#node.sheet.querySelectorAll(`[data-field="${name}"]`)]
+                .map(node => node.value.trim())
+                .filter(Boolean),
+        )];
         const sensors = {
-            air_temperature: field('air_temperature').value,
-            relative_humidity: field('relative_humidity').value,
+            air_temperature: picked('air_temperature'),
+            relative_humidity: picked('relative_humidity'),
             leaf_drop: Number(field('leaf_drop').value),
         };
+        if (!sensors.air_temperature.length || !sensors.relative_humidity.length) {
+            this.#node.sheetNote.textContent = this.#text.needSensor;
+            this.#node.sheetNote.classList.add('bad');
+            return;
+        }
         if (field('carbon_dioxide').value) sensors.carbon_dioxide = field('carbon_dioxide').value;
         if (field('leaf_sensor').value) sensors.leaf_sensor = field('leaf_sensor').value;
 
@@ -1510,13 +1546,17 @@ class WeatherScheduleCard extends HTMLElement {
         this.#node.historyChart.replaceChildren();
         const token = ++this.#request;
         let series = [];
+        let ghosts = [];
         try {
-            series = await this.#fetchSeries(room, spec, hours);
+            [series, ghosts] = await Promise.all([
+                this.#fetchSeries(room, spec, hours),
+                this.#ghostSeries(room, spec, hours).catch(() => []),
+            ]);
         } catch (error) {
             console.warn('weather-schedule-card: history unavailable', error);
         }
         if (token !== this.#request) return;
-        this.#paint(this.#dialogChart(), spec, series, hours);
+        this.#paint(this.#dialogChart(), spec, series, hours, ghosts);
     }
 
     /* ------------------------------------------------------------------
@@ -1786,6 +1826,66 @@ class WeatherScheduleCard extends HTMLElement {
         this.#paint(this.#cardChart(), spec, this.#series, hours);
     }
 
+    /* O historico cru de uma entidade, no formato que o desenho usa. */
+    async #historyOf(entityId, start, end) {
+        const answer = await this.#hass.callWS({
+            type: 'history/history_during_period',
+            start_time: start.toISOString(),
+            end_time: end.toISOString(),
+            entity_ids: [entityId],
+            minimal_response: true,
+            no_attributes: true,
+            significant_changes_only: false,
+        });
+        return (answer?.[entityId] || []).map(point => ({
+            time: (point.lu ?? point.last_updated ?? 0) * 1000,
+            value: Number.parseFloat(point.s ?? point.state),
+        })).filter(point => Number.isFinite(point.time) && Number.isFinite(point.value));
+    }
+
+    /* Casa duas series pelo tempo: para cada leitura de uma, a leitura que a
+       outra tinha naquele instante. E o mesmo casamento que reconstroi o VPD
+       do passado, agora aplicado a um par de sensores. */
+    #combine(first, second, transform) {
+        let cursor = 0;
+        const out = [];
+        for (const point of first) {
+            while (cursor + 1 < second.length && second[cursor + 1].time <= point.time) cursor++;
+            const other = second[cursor]?.value;
+            if (!Number.isFinite(other)) continue;
+            out.push({time: point.time, value: transform(point.value, other)});
+        }
+        return out;
+    }
+
+    /* Uma serie por sensor, quando a sala tem mais de um. A media continua
+       sendo a linha principal; estas ficam atras dela. */
+    async #ghostSeries(room, spec, hours) {
+        const sensors = this.#state(room.status)?.attributes?.sensors || {};
+        const airs = sensors.air_temperature || [];
+        const humidities = sensors.relative_humidity || [];
+        const end = new Date();
+        const start = new Date(end.getTime() - hours * 3600000);
+        const each = ids => Promise.all(ids.map(id => this.#historyOf(id, start, end)));
+
+        if (spec.key === 'temperature' && airs.length > 1) return each(airs);
+        if (spec.key === 'humidity' && humidities.length > 1) return each(humidities);
+
+        const derived = spec.isVpd || spec.key === 'dew';
+        if (!derived || airs.length < 2 || airs.length !== humidities.length) return [];
+        const drop = this.#leafDrop(room);
+        const transform = spec.isVpd
+            ? (air, humidity) => vapourPressureDeficit(air - drop, air, humidity)
+            : (air, humidity) => dewPoint(air, humidity);
+        return Promise.all(airs.map(async (id, index) => {
+            const [temperatures, moisture] = await Promise.all([
+                this.#historyOf(id, start, end),
+                this.#historyOf(humidities[index], start, end),
+            ]);
+            return this.#combine(temperatures, moisture, transform);
+        }));
+    }
+
     async #fetchSeries(room, spec, hours) {
         const end = new Date();
         const start = new Date(end.getTime() - hours * 3600000);
@@ -1858,7 +1958,7 @@ class WeatherScheduleCard extends HTMLElement {
 
     /* O mesmo motor desenha o gráfico do card e o do diálogo. O alvo diz onde
        pintar; o resto — bandas, faixa, pontos por hora, hover — é igual nos dois. */
-    #paint(target, spec, series, hours) {
+    #paint(target, spec, series, hours, ghosts = []) {
         const svg = target.svg;
         const now = Date.now();
         const start = now - hours * 3600000;
@@ -1996,10 +2096,19 @@ class WeatherScheduleCard extends HTMLElement {
             svg.appendChild(label);
         }
 
-        svg.appendChild(make('path', {
-            d: points.map((point, index) => `${index ? 'L' : 'M'} ${x(point.time).toFixed(1)} ${y(point.value).toFixed(1)}`).join(' '),
-            class: 'trend',
-        }));
+        const trace = line => line
+            .map((point, index) => `${index ? 'L' : 'M'} ${x(point.time).toFixed(1)} ${y(point.value).toFixed(1)}`)
+            .join(' ');
+
+        for (const ghost of ghosts) {
+            const line = (ghost || [])
+                .filter(point => point.time >= start && Number.isFinite(point.value))
+                .sort((a, b) => a.time - b.time);
+            if (line.length < 2) continue;
+            svg.appendChild(make('path', {d: trace(line), class: 'ghost'}));
+        }
+
+        svg.appendChild(make('path', {d: trace(points), class: 'trend'}));
 
         this.#plots.set(svg, {points, spec, start, now, pad, plotWidth, x, y, clock, target, height});
 

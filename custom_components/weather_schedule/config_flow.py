@@ -92,10 +92,14 @@ def _clean_cycle(raw: Any) -> dict[str, Any]:
     return {"on": on, "off": off, "enabled": bool(raw.get("enabled", True))}
 
 
-def _sensor_picker(device_class: SensorDeviceClass) -> selector.EntitySelector:
+def _sensor_picker(
+    device_class: SensorDeviceClass, multiple: bool = False
+) -> selector.EntitySelector:
     """Return a picker limited to sensors of one device class."""
     return selector.EntitySelector(
-        selector.EntitySelectorConfig(domain="sensor", device_class=device_class)
+        selector.EntitySelectorConfig(
+            domain="sensor", device_class=device_class, multiple=multiple
+        )
     )
 
 
@@ -115,18 +119,26 @@ def _number_box(
 def _sensor_schema(current: dict[str, Any]) -> vol.Schema:
     """Return the sensor form, pre-filled with what the room already uses."""
 
+    plural = (CONF_AIR_TEMPERATURE, CONF_RELATIVE_HUMIDITY)
+
     def filled(key: str) -> dict[str, Any]:
         value = current.get(key)
-        return {"suggested_value": value} if value is not None else {}
+        if value is None:
+            return {}
+        # Uma sala antiga guardou um id solto onde agora vai uma lista.
+        if key in plural and isinstance(value, str):
+            value = [value]
+        return {"suggested_value": value}
 
     return vol.Schema(
         {
+            # Mais de um sensor por sala: a sala passa a ser a média deles.
             vol.Required(
                 CONF_AIR_TEMPERATURE, description=filled(CONF_AIR_TEMPERATURE)
-            ): _sensor_picker(SensorDeviceClass.TEMPERATURE),
+            ): _sensor_picker(SensorDeviceClass.TEMPERATURE, multiple=True),
             vol.Required(
                 CONF_RELATIVE_HUMIDITY, description=filled(CONF_RELATIVE_HUMIDITY)
-            ): _sensor_picker(SensorDeviceClass.HUMIDITY),
+            ): _sensor_picker(SensorDeviceClass.HUMIDITY, multiple=True),
             vol.Optional(
                 CONF_LEAF_SENSOR, description=filled(CONF_LEAF_SENSOR)
             ): _sensor_picker(SensorDeviceClass.TEMPERATURE),

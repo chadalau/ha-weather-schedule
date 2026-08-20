@@ -97,6 +97,7 @@ SENSORS: tuple[RoomSensorDescription, ...] = (
             # fills its settings sheet from here instead of asking the user to
             # repeat the entity ids in YAML.
             "sources": coordinator.sources,
+            "sensors": coordinator.sensors,
             "settings": coordinator.tunables,
             "fans": coordinator.fans,
             "cycles": coordinator.cycles.status if coordinator.cycles else {},

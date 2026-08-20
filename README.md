@@ -77,6 +77,23 @@ tile toggles the fan; clicking the pill steps through 25 / 50 / 75 / 100%.
 A `switch.*` gets the same tile without the speed pill, and an unavailable
 entity is dimmed instead of hidden.
 
+### More than one sensor per room
+
+Temperature and humidity accept several sensors. The room then reads the average
+of them, and every tile — temperature, humidity, dew point, VPD — shows that
+average.
+
+The average is taken after the maths, not before: each sensor is paired with the
+humidity sensor picked alongside it, VPD and dew point are computed for that
+pair, and those results are averaged. Saturation pressure is exponential in
+temperature, so averaging first is not the same thing — in a room with a 6 °C
+spread the two answers differ by about 7%. Pairing needs the two lists to be the
+same length; when they are not, the room falls back to computing once from the
+two averages.
+
+A sensor that goes unavailable simply stops being part of the average; the room
+is only unreadable when every sensor of a reading is silent.
+
 ### Tapping a tile opens its history
 
 The card's own chart always shows the VPD with its phase bands. Tapping a tile
@@ -85,6 +102,10 @@ point — with its own unit on the axis, the target window of the current phase
 drawn behind the line, and a range selector (6 h / 24 h / 3 d / 7 d). The dew
 point uses air temperature minus 2 °C as its ceiling, which is the line
 condensation starts at.
+
+In a room with more than one sensor the dialog also draws one thin, faded line
+per sensor behind the average — the spread of the room, without competing with
+the reading that drives it.
 
 ### Tapping the status chip opens the day
 

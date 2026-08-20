@@ -72,6 +72,11 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _mean(values: list[float]) -> float | None:
+    """Return the average of what was actually read, or None if nothing was."""
+    return sum(values) / len(values) if values else None
+
+
 @dataclass(slots=True)
 class RoomClimate:
     """The climate of one room at one moment."""
@@ -118,11 +123,38 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         """Return whether a CO2 sensor was configured for this room."""
         return bool(self.settings.get(CONF_CARBON_DIOXIDE))
 
+    def _entities(self, key: str) -> list[str]:
+        """Return every entity configured for a reading.
+
+        Temperature and humidity accept more than one sensor, and a room set up
+        before that still has a single entity id saved; both shapes read the
+        same from here.
+        """
+        value = self.settings.get(key)
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value else []
+        return [entity for entity in value if entity]
+
     @property
     def sources(self) -> dict[str, str | None]:
-        """Return which entity feeds each reading, for the card to show."""
+        """Return the first entity of each reading, for the card to show."""
         return {
-            key: self.settings.get(key)
+            key: (self._entities(key) or [None])[0]
+            for key in (
+                CONF_AIR_TEMPERATURE,
+                CONF_RELATIVE_HUMIDITY,
+                CONF_CARBON_DIOXIDE,
+                CONF_LEAF_SENSOR,
+            )
+        }
+
+    @property
+    def sensors(self) -> dict[str, list[str]]:
+        """Return every entity of each reading, in the order they were picked."""
+        return {
+            key: self._entities(key)
             for key in (
                 CONF_AIR_TEMPERATURE,
                 CONF_RELATIVE_HUMIDITY,
@@ -172,7 +204,7 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
                 CONF_LEAF_SENSOR,
                 CONF_CARBON_DIOXIDE,
             )
-            if (entity_id := self.settings.get(key))
+            for entity_id in self._entities(key)
         ]
         if self.config_entry is None:
             return
@@ -202,6 +234,11 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         """Return the current climate of the room."""
         return self._read_room()
 
+    def _readings(self, key: str, read) -> list[float]:
+        """Return every reading a role could produce, skipping what is silent."""
+        values = [read(entity_id) for entity_id in self._entities(key)]
+        return [value for value in values if value is not None]
+
     @callback
     def _read_room(self) -> RoomClimate:
         """Build the climate from whatever the sensors are willing to report.
@@ -209,10 +246,15 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         A sensor that is missing, unavailable or not a number costs only the
         readings that depend on it; the rest of the room carries on.
         """
-        air = self._temperature_of(self.settings.get(CONF_AIR_TEMPERATURE))
-        humidity = self._percentage_of(self.settings.get(CONF_RELATIVE_HUMIDITY))
-        leaf = self._temperature_of(self.settings.get(CONF_LEAF_SENSOR))
-        co2 = self._number_of(self.settings.get(CONF_CARBON_DIOXIDE))
+        airs = self._readings(CONF_AIR_TEMPERATURE, self._temperature_of)
+        humidities = self._readings(CONF_RELATIVE_HUMIDITY, self._percentage_of)
+        leaves = self._readings(CONF_LEAF_SENSOR, self._temperature_of)
+        co2s = self._readings(CONF_CARBON_DIOXIDE, self._number_of)
+
+        air = _mean(airs)
+        humidity = _mean(humidities)
+        leaf = _mean(leaves)
+        co2 = _mean(co2s)
 
         if leaf is None and air is not None:
             # Material colhido não transpira, logo não fica abaixo do ar: na
@@ -235,13 +277,41 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
             return climate
 
         if air is not None and humidity is not None:
-            climate.dew_point = psychrometrics.dew_point(air, humidity)
-            climate.absolute_humidity = psychrometrics.absolute_humidity(air, humidity)
-            climate.condensation_margin = psychrometrics.condensation_margin(
-                air, humidity
+            # A psicrometria é exponencial na temperatura, então a média das
+            # contas não é a conta das médias. Com dois sensores a diferença
+            # chega a 7% num ambiente mal misturado: conta-se ponto a ponto e
+            # a média vem depois.
+            pairs = (
+                list(zip(airs, humidities))
+                if len(airs) == len(humidities) and len(airs) > 1
+                else [(air, humidity)]
             )
-            if leaf is not None:
-                climate.vpd = psychrometrics.vapour_pressure_deficit(leaf, air, humidity)
+            drop = 0.0 if self.phase == PHASE_DRY else self.leaf_drop
+            climate.dew_point = _mean(
+                [psychrometrics.dew_point(t, rh) for t, rh in pairs]
+            )
+            climate.absolute_humidity = _mean(
+                [psychrometrics.absolute_humidity(t, rh) for t, rh in pairs]
+            )
+            climate.condensation_margin = _mean(
+                [psychrometrics.condensation_margin(t, rh) for t, rh in pairs]
+            )
+            if leaves:
+                # Um termômetro de folha mede a folha inteira da sala: ele vale
+                # para todos os pontos, e não há par a montar.
+                climate.vpd = _mean(
+                    [
+                        psychrometrics.vapour_pressure_deficit(leaf, t, rh)
+                        for t, rh in pairs
+                    ]
+                )
+            else:
+                climate.vpd = _mean(
+                    [
+                        psychrometrics.vapour_pressure_deficit(t - drop, t, rh)
+                        for t, rh in pairs
+                    ]
+                )
 
         window = self.bounds
         climate.drifts = self._drifts_of(climate, window)

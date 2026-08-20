@@ -108,3 +108,102 @@ def test_healthy_room_reports_on_target(coordinator, hass):
 
     assert climate.drifts == []
     assert climate.status == STATUS_ON_TARGET
+
+
+# --------------------------------------------------------------------------- #
+# Duas leituras por sala: a sala é a média delas.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def paired(coordinator, hass):
+    """Uma sala com dois pares de sensores, bem separados um do outro."""
+    from custom_components.weather_schedule.const import (
+        CONF_AIR_TEMPERATURE,
+        CONF_RELATIVE_HUMIDITY,
+    )
+
+    coordinator.settings[CONF_AIR_TEMPERATURE] = ["sensor.air", "sensor.air_2"]
+    coordinator.settings[CONF_RELATIVE_HUMIDITY] = ["sensor.humidity", "sensor.humidity_2"]
+    hass.states.set("sensor.air", "22.0", unit_of_measurement="°C")
+    hass.states.set("sensor.air_2", "28.0", unit_of_measurement="°C")
+    hass.states.set("sensor.humidity", "65", unit_of_measurement="%")
+    hass.states.set("sensor.humidity_2", "45", unit_of_measurement="%")
+    return coordinator
+
+
+def test_a_single_entity_still_works(coordinator):
+    """Sala configurada antes da lista guardou um id solto."""
+    assert coordinator._entities("air_temperature") == ["sensor.air"]
+    assert coordinator._read_room().air_temperature == pytest.approx(24.0)
+
+
+def test_the_room_reads_the_average_of_its_sensors(paired):
+    climate = paired._read_room()
+    assert climate.air_temperature == pytest.approx(25.0)
+    assert climate.relative_humidity == pytest.approx(55.0)
+
+
+def test_vpd_averages_the_points_not_the_readings(paired):
+    """A conta é exponencial na temperatura: mediar antes muda o resultado."""
+    from custom_components.weather_schedule import psychrometrics as psy
+
+    per_point = (
+        psy.vapour_pressure_deficit(20.0, 22.0, 65.0)
+        + psy.vapour_pressure_deficit(26.0, 28.0, 45.0)
+    ) / 2
+    of_the_average = psy.vapour_pressure_deficit(23.0, 25.0, 55.0)
+
+    assert paired._read_room().vpd == pytest.approx(per_point, abs=0.001)
+    # e as duas contas não são a mesma coisa, que é o motivo de escolher uma
+    assert abs(per_point - of_the_average) > 0.05
+
+
+def test_dew_point_also_averages_the_points(paired):
+    from custom_components.weather_schedule import psychrometrics as psy
+
+    expected = (psy.dew_point(22.0, 65.0) + psy.dew_point(28.0, 45.0)) / 2
+    assert paired._read_room().dew_point == pytest.approx(expected, abs=0.001)
+
+
+def test_one_sensor_going_quiet_leaves_the_other_reading(paired, hass):
+    hass.states.set("sensor.air_2", "unavailable")
+
+    climate = paired._read_room()
+
+    assert climate.readable is True
+    assert climate.air_temperature == pytest.approx(22.0)
+
+
+def test_the_room_is_unreadable_only_when_every_sensor_is(paired, hass):
+    hass.states.set("sensor.air", "unavailable")
+    hass.states.set("sensor.air_2", "unavailable")
+
+    assert paired._read_room().readable is False
+
+
+def test_mismatched_counts_fall_back_to_the_averages(coordinator, hass):
+    """Três termômetros e dois higrômetros não formam pares; a média resolve."""
+    from custom_components.weather_schedule import psychrometrics as psy
+    from custom_components.weather_schedule.const import (
+        CONF_AIR_TEMPERATURE,
+        CONF_RELATIVE_HUMIDITY,
+    )
+
+    coordinator.settings[CONF_AIR_TEMPERATURE] = ["sensor.air", "sensor.air_2", "sensor.air_3"]
+    coordinator.settings[CONF_RELATIVE_HUMIDITY] = ["sensor.humidity", "sensor.humidity_2"]
+    for entity, value in (("sensor.air", 22.0), ("sensor.air_2", 25.0), ("sensor.air_3", 28.0)):
+        hass.states.set(entity, str(value), unit_of_measurement="°C")
+    hass.states.set("sensor.humidity", "65", unit_of_measurement="%")
+    hass.states.set("sensor.humidity_2", "45", unit_of_measurement="%")
+
+    climate = coordinator._read_room()
+
+    assert climate.air_temperature == pytest.approx(25.0)
+    assert climate.vpd == pytest.approx(psy.vapour_pressure_deficit(23.0, 25.0, 55.0), abs=0.001)
+
+
+def test_the_card_gets_the_first_sensor_and_the_full_list(paired):
+    assert paired.sources["air_temperature"] == "sensor.air"
+    assert paired.sensors["air_temperature"] == ["sensor.air", "sensor.air_2"]
+    assert paired.sensors["carbon_dioxide"] == ["sensor.co2"]
