@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -39,7 +39,7 @@ const TEXT = {
         phase: {propagation: 'Propagation', veg_early: 'Early vegetative', veg_late: 'Late vegetative', flower_early: 'Early flower', flower_late: 'Late flower', dry: 'Drying'},
         status: {on_target: 'On target', vpd_low: 'VPD low', vpd_high: 'VPD high', too_cold: 'Too cold', too_warm: 'Too warm', too_dry: 'Too dry', too_humid: 'Too humid', co2_low: 'CO₂ low', co2_high: 'CO₂ high'},
         dayTitle: 'How the day went', inRange: 'on target', noReading: 'no reading',
-        driftShare: 'share of the time in each drift',
+        driftShare: 'the day split between what pulled the room off target',
         temperature: 'Temperature', humidity: 'Humidity', co2: 'CO₂', dewPoint: 'Dew point',
         dewPointShort: 'Dew point',
         fans: 'Fans', on: 'On', off: 'Off', unavailable: 'Unavailable',
@@ -63,7 +63,7 @@ const TEXT = {
         phase: {propagation: 'Propagação', veg_early: 'Vegetativo inicial', veg_late: 'Vegetativo tardio', flower_early: 'Floração inicial', flower_late: 'Floração tardia', dry: 'Secagem'},
         status: {on_target: 'Na faixa', vpd_low: 'VPD baixo', vpd_high: 'VPD alto', too_cold: 'Frio demais', too_warm: 'Quente demais', too_dry: 'Seco demais', too_humid: 'Úmido demais', co2_low: 'CO₂ baixo', co2_high: 'CO₂ alto'},
         dayTitle: 'Como foi o dia', inRange: 'na faixa', noReading: 'sem leitura',
-        driftShare: 'fatia do tempo em cada desvio',
+        driftShare: 'o dia repartido entre o que tirou a sala da faixa',
         temperature: 'Temperatura', humidity: 'Umidade', co2: 'CO₂', dewPoint: 'Ponto de orvalho',
         dewPointShort: 'P. de orvalho',
         fans: 'Ventiladores', on: 'Ligado', off: 'Desligado', unavailable: 'Indisponível',
@@ -1560,8 +1560,13 @@ class WeatherScheduleCard extends HTMLElement {
     }
 
     /* O estado do sensor conta só o primeiro desvio; a lista completa mora no
-       atributo `drifts`, e é ela que a estrela usa. Um instante quente e seco
-       ao mesmo tempo pesa nos dois eixos, então as fatias não somam 100%. */
+       atributo `drifts`, e é ela que a estrela usa.
+
+       Cada instante reparte o seu tempo entre os desvios que estavam
+       acontecendo nele: meio a meio quando a sala estava quente e seca ao
+       mesmo tempo. Sem isso o mesmo minuto seria contado duas vezes e as
+       pontas somariam mais que o dia inteiro — num desenho que, de tão
+       parecido com um todo repartido, promete justamente o contrário. */
     async #dayShare(entityId, hours) {
         const end = new Date();
         const start = new Date(end.getTime() - hours * 3600000);
@@ -1610,8 +1615,9 @@ class WeatherScheduleCard extends HTMLElement {
                 onTarget += span;
                 continue;
             }
+            const slice = span / drifts.length;
             for (const drift of drifts) {
-                buckets.set(drift, (buckets.get(drift) || 0) + span);
+                buckets.set(drift, (buckets.get(drift) || 0) + slice);
             }
         }
 
@@ -1626,8 +1632,28 @@ class WeatherScheduleCard extends HTMLElement {
         };
     }
 
+    /* Arredondar cada fatia por conta própria faz a soma dos rótulos fugir do
+       100% que os valores exatos fecham. O resto maior leva o décimo que
+       sobra, então o que está escrito na tela também soma o dia inteiro. */
+    #roundShares(values) {
+        const tenths = values.map(value => value * 10);
+        const floors = tenths.map(Math.floor);
+        const target = Math.round(tenths.reduce((total, value) => total + value, 0));
+        let left = target - floors.reduce((total, value) => total + value, 0);
+        const byRest = tenths
+            .map((value, index) => ({index, rest: value - floors[index]}))
+            .sort((a, b) => b.rest - a.rest);
+        const out = [...floors];
+        for (let step = 0; left > 0 && byRest.length; step++, left--) {
+            out[byRest[step % byRest.length].index] += 1;
+        }
+        return out.map(value => value / 10);
+    }
+
     #paintDial(share) {
         const svg = this.#node.dialChart;
+        const rounded = this.#roundShares([...share.axes.map(axis => axis.share), share.onTarget]);
+        const onTarget = rounded.at(-1);
         const make = (tag, attributes) => {
             const node = document.createElementNS(SVG_NS, tag);
             for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
@@ -1679,12 +1705,12 @@ class WeatherScheduleCard extends HTMLElement {
                 x: x.toFixed(1), y: (y + 11).toFixed(1), 'text-anchor': anchor,
                 class: axis.share > 0 ? 'axis-share' : 'axis-share quiet',
             });
-            value.textContent = `${this.#number(axis.share, axis.share >= 10 ? 0 : 1)}%`;
+            value.textContent = `${this.#number(rounded[index], 1)}%`;
             svg.appendChild(value);
         });
 
         const core = make('text', {x: cx, y: cy + 2, class: 'dial-core', 'text-anchor': 'middle'});
-        core.textContent = `${this.#number(share.onTarget, share.onTarget >= 10 ? 0 : 1)}%`;
+        core.textContent = `${this.#number(onTarget, 1)}%`;
         svg.appendChild(core);
         const label = make('text', {x: cx, y: cy + 19, class: 'dial-core-label', 'text-anchor': 'middle'});
         label.textContent = this.#text.inRange;

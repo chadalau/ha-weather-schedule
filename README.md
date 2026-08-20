@@ -94,10 +94,13 @@ each facing its opposite — dry against humid, cold against warm — so a bad d
 has a shape before it has numbers, and a good day is a dot in the middle. The
 centre carries the share of the time on target.
 
-The spokes come from the `drifts` attribute, not from the state, so a moment
-that was both too warm and too dry counts on both spokes. That means the spokes
-do not add up to 100%: each one is its own share of the time. Stretches where
-the room could not be read are excluded and reported below the chart.
+The spokes come from the `drifts` attribute, not from the state — the state
+carries only the first drift, so a room that is warm and dry at once would count
+as warm alone. Each moment splits its time between the drifts it had, half and
+half for two of them, so the spokes and the centre add up to the whole window:
+the chart reads as a day divided, because that is what it is. The printed
+percentages are rounded so they still total 100%. Stretches where the room could
+not be read stay out of the split and are reported below the chart.
 
 ### Hourly dots
 

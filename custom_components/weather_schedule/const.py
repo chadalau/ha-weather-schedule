@@ -7,7 +7,7 @@ from typing import Final
 DOMAIN: Final = "weather_schedule"
 
 # Keep in sync with manifest.json: it also busts the browser cache of the card.
-VERSION: Final = "1.2.0"
+VERSION: Final = "1.2.1"
 
 CARD_URL_PATH: Final = "/weather_schedule_card"
 CARD_FILENAME: Final = "weather-schedule-card.js"
