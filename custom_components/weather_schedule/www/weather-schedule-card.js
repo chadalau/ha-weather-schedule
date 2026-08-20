@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -931,9 +931,33 @@ class WeatherScheduleCard extends HTMLElement {
         return bounds;
     }
 
+    /* Os sensores de um papel, quando a integracao publicou a lista. */
+    #sensorsOf(room, role) {
+        const list = this.#state(room.status)?.attributes?.sensors?.[role];
+        return Array.isArray(list) && list.length ? list : [];
+    }
+
+    /* A media do que os sensores estao dizendo agora.
+
+       A integracao publica entidade propria para VPD e orvalho, ja na media,
+       mas temperatura e umidade sao lidas do sensor cru - e um sensor cru e
+       sempre um so. Sem esta media o box mostraria a primeira sonda e chamaria
+       de sala. */
+    #averageNow(room, role, fallback, convert) {
+        const values = this.#sensorsOf(room, role)
+            .map(entityId => convert(entityId))
+            .filter(Number.isFinite);
+        if (values.length > 1) return values.reduce((total, value) => total + value, 0) / values.length;
+        return convert(fallback);
+    }
+
     #climate(room) {
-        const temperature = this.#celsius(room.temperature);
-        const humidity = this.#value(room.humidity);
+        const temperature = this.#averageNow(
+            room, 'air_temperature', room.temperature, id => this.#celsius(id),
+        );
+        const humidity = this.#averageNow(
+            room, 'relative_humidity', room.humidity, id => this.#value(id),
+        );
         let vpd = this.#value(room.vpd);
         if (!Number.isFinite(vpd) && Number.isFinite(temperature) && Number.isFinite(humidity)) {
             const drop = Number.isFinite(Number(room.leaf_drop)) ? Number(room.leaf_drop) : 2;
@@ -1858,6 +1882,31 @@ class WeatherScheduleCard extends HTMLElement {
         return out;
     }
 
+    /* A media de varias series, no tempo da primeira: para cada leitura dela,
+       o valor que as outras tinham naquele instante. Uma serie que ainda nao
+       comecou simplesmente nao entra na conta daquele ponto. */
+    #averageSeries(all) {
+        const lines = all.filter(line => line && line.length);
+        if (lines.length < 2) return lines[0] || [];
+        const [base, ...rest] = lines;
+        const cursors = rest.map(() => 0);
+        return base.map(point => {
+            let total = point.value;
+            let count = 1;
+            rest.forEach((line, index) => {
+                while (cursors[index] + 1 < line.length && line[cursors[index] + 1].time <= point.time) {
+                    cursors[index]++;
+                }
+                const other = line[cursors[index]];
+                if (other && other.time <= point.time && Number.isFinite(other.value)) {
+                    total += other.value;
+                    count++;
+                }
+            });
+            return {time: point.time, value: total / count};
+        });
+    }
+
     /* Uma serie por sensor, quando a sala tem mais de um. A media continua
        sendo a linha principal; estas ficam atras dela. */
     async #ghostSeries(room, spec, hours) {
@@ -1904,6 +1953,15 @@ class WeatherScheduleCard extends HTMLElement {
                 value: Number.parseFloat(point.s ?? point.state),
             })).filter(point => Number.isFinite(point.time) && Number.isFinite(point.value));
         };
+
+        // Com mais de uma sonda, a linha principal e a media delas; a entidade
+        // sozinha seria a primeira sonda passando por sala.
+        const role = spec.key === 'temperature' ? 'air_temperature'
+            : spec.key === 'humidity' ? 'relative_humidity' : null;
+        const probes = role ? this.#sensorsOf(room, role) : [];
+        if (probes.length > 1) {
+            return this.#averageSeries(await Promise.all(probes.map(ask)));
+        }
 
         const recorded = spec.entity ? await ask(spec.entity) : [];
 

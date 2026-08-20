@@ -94,6 +94,11 @@ two averages.
 A sensor that goes unavailable simply stops being part of the average; the room
 is only unreadable when every sensor of a reading is silent.
 
+VPD and dew point come from the integration already averaged, but temperature
+and humidity are read straight off the sensors, and a sensor is always a single
+probe — so the card averages those two itself, both for the tile and for the
+line its history draws.
+
 ### Tapping a tile opens its history
 
 The card's own chart always shows the VPD with its phase bands. Tapping a tile
