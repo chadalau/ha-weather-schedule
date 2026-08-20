@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -105,8 +105,13 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--primary-co
 
 /* Tudo que é controle no topo usa a mesma pastilha: mesma altura, mesmo
    raio, mesma borda. É o que faz a linha parecer uma linha só. */
+/* A esquerda diz como a sala esta; a direita e onde se mexe nela. */
 .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.header-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.header-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+/* margin-left auto e o que mantem a fase e a engrenagem a direita tambem
+   quando o cabecalho quebra em duas linhas, com varias salas. */
+.header-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: auto; }
+.header-left .chip.status { flex: 0 0 auto; }
 .chip { height: 30px; box-sizing: border-box; padding: 0 12px; display: inline-flex; align-items: center;
   gap: 6px; border: 1px solid var(--divider-color); border-radius: 15px; background: transparent;
   color: var(--primary-text-color); font-size: 13px; white-space: nowrap; }
@@ -140,9 +145,12 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--primary-co
 .phase-menu button:hover { background: var(--secondary-background-color); }
 .phase-menu button.on { background: var(--ws-teal); color: var(--text-primary-color, #fff); }
 
-.gear { width: 30px; padding: 0; justify-content: center; color: var(--secondary-text-color);
-  --mdc-icon-size: 17px; cursor: pointer; }
-.gear:hover { color: var(--ws-teal); border-color: var(--ws-teal); }
+/* Sem pastilha, como nos outros cards: so o icone, com o alvo de toque de
+   36px que o dedo precisa e um fundo redondo no hover. */
+.gear { width: 36px; height: 36px; flex: 0 0 auto; display: inline-grid; place-items: center;
+  appearance: none; border: 0; border-radius: 50%; background: transparent;
+  color: var(--secondary-text-color); --mdc-icon-size: 21px; cursor: pointer; }
+.gear:hover { background: var(--secondary-background-color); color: var(--primary-text-color); }
 
 /* A leitura é texto do próprio SVG: encolhe junto com o gráfico, então nunca
    briga com os rótulos das bandas, em nenhuma largura de card. */
@@ -325,11 +333,7 @@ svg.chart { display: block; width: 100%; height: auto; border-radius: 10px; }
   .fan-grid { grid-template-columns: 1fr; }
 }
 
-/* gear and the settings sheet */
-.gear { appearance: none; border: 1px solid var(--divider-color); border-radius: 16px; background: transparent;
-  color: var(--secondary-text-color); padding: 5px 9px; display: inline-grid; place-items: center;
-  --mdc-icon-size: 18px; }
-.gear:hover { color: var(--primary-color); border-color: var(--primary-color); }
+/* the settings sheet */
 
 dialog.sheet { border: 1px solid var(--divider-color); border-radius: 14px; padding: 0; width: min(440px, 92vw);
   background: var(--card-background-color); color: var(--primary-text-color); }
@@ -894,9 +898,11 @@ class WeatherScheduleCard extends HTMLElement {
         const card = document.createElement('ha-card');
         card.innerHTML = `
             <div class="header">
-                <div class="rooms" role="group"></div>
-                <div class="header-right">
+                <div class="header-left">
+                    <div class="rooms" role="group"></div>
                     <span class="chip status" hidden><span class="dot"></span><span class="status-text"></span></span>
+                </div>
+                <div class="header-right">
                     <div class="phase-wrap" hidden>
                         <button type="button" class="chip phase" aria-haspopup="listbox" aria-expanded="false">
                             <span class="dot"></span><span class="phase-text"></span>
@@ -904,7 +910,7 @@ class WeatherScheduleCard extends HTMLElement {
                         </button>
                         <div class="phase-menu" role="listbox" hidden></div>
                     </div>
-                    <button type="button" class="chip gear" title="${this.#text.settings}"
+                    <button type="button" class="gear" title="${this.#text.settings}"
                             aria-label="${this.#text.settings}"><ha-icon icon="mdi:cog"></ha-icon></button>
                 </div>
             </div>
