@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.2.1';
+const VERSION = '1.2.2';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -39,7 +39,7 @@ const TEXT = {
         phase: {propagation: 'Propagation', veg_early: 'Early vegetative', veg_late: 'Late vegetative', flower_early: 'Early flower', flower_late: 'Late flower', dry: 'Drying'},
         status: {on_target: 'On target', vpd_low: 'VPD low', vpd_high: 'VPD high', too_cold: 'Too cold', too_warm: 'Too warm', too_dry: 'Too dry', too_humid: 'Too humid', co2_low: 'CO₂ low', co2_high: 'CO₂ high'},
         dayTitle: 'How the day went', inRange: 'on target', noReading: 'no reading',
-        driftShare: 'the day split between what pulled the room off target',
+        driftShare: 'the day split between what pulled the room off target', outerRing: 'outer ring',
         temperature: 'Temperature', humidity: 'Humidity', co2: 'CO₂', dewPoint: 'Dew point',
         dewPointShort: 'Dew point',
         fans: 'Fans', on: 'On', off: 'Off', unavailable: 'Unavailable',
@@ -63,7 +63,7 @@ const TEXT = {
         phase: {propagation: 'Propagação', veg_early: 'Vegetativo inicial', veg_late: 'Vegetativo tardio', flower_early: 'Floração inicial', flower_late: 'Floração tardia', dry: 'Secagem'},
         status: {on_target: 'Na faixa', vpd_low: 'VPD baixo', vpd_high: 'VPD alto', too_cold: 'Frio demais', too_warm: 'Quente demais', too_dry: 'Seco demais', too_humid: 'Úmido demais', co2_low: 'CO₂ baixo', co2_high: 'CO₂ alto'},
         dayTitle: 'Como foi o dia', inRange: 'na faixa', noReading: 'sem leitura',
-        driftShare: 'o dia repartido entre o que tirou a sala da faixa',
+        driftShare: 'o dia repartido entre o que tirou a sala da faixa', outerRing: 'anel externo',
         temperature: 'Temperatura', humidity: 'Umidade', co2: 'CO₂', dewPoint: 'Ponto de orvalho',
         dewPointShort: 'P. de orvalho',
         fans: 'Ventiladores', on: 'Ligado', off: 'Desligado', unavailable: 'Indisponível',
@@ -313,7 +313,7 @@ dialog.dial::backdrop { background: rgba(0, 0, 0, .55); }
 .axis-share.quiet { fill: var(--secondary-text-color); font-weight: 400; }
 .dial-core { fill: var(--ws-teal); font-size: 27px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .dial-core-label { fill: var(--secondary-text-color); font-size: 11px; }
-.ring-mark { fill: var(--secondary-text-color); font-size: 10px; opacity: .8; }
+.core-plate { fill: var(--card-background-color); opacity: .92; }
 
 /* Same geometry as the light tiles of the Light Scheduler card — 52px tall,
    two per row, icon plus copy on the left and a pill on the right. Only the
@@ -1662,17 +1662,20 @@ class WeatherScheduleCard extends HTMLElement {
         const cx = 230;
         const cy = 196;
         const radius = 108;
+        // O miolo e do texto, entao a escala comeca na borda do disco: uma
+        // ponta de 4% fica visivel em vez de morrer embaixo do numero.
+        const hole = 42;
         const worst = Math.max(...share.axes.map(axis => axis.share), 0);
         // A escala fecha no degrau logo acima do pior eixo: com o dia todo em
         // 5% de desvio, uma escala de 100% desenharia um ponto.
         const scale = [10, 25, 50, 100].find(step => worst <= step) || 100;
         const at = (index, value) => {
             const angle = (Math.PI * 2 * index) / DRIFT_AXES.length - Math.PI / 2;
-            const distance = (Math.min(value, scale) / scale) * radius;
+            const distance = hole + (Math.min(value, scale) / scale) * (radius - hole);
             return [cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance];
         };
 
-        for (const step of [0.25, 0.5, 0.75, 1]) {
+        for (const step of [0, 0.25, 0.5, 0.75, 1]) {
             const corners = share.axes.map((_, index) => at(index, scale * step));
             svg.appendChild(make('polygon', {
                 points: corners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' '),
@@ -1695,7 +1698,7 @@ class WeatherScheduleCard extends HTMLElement {
         });
 
         share.axes.forEach((axis, index) => {
-            const [x, y] = at(index, scale * 1.28);
+            const [x, y] = at(index, scale * 1.34);
             const middle = Math.abs(x - cx) < 6;
             const anchor = middle ? 'middle' : x > cx ? 'start' : 'end';
             const name = make('text', {x: x.toFixed(1), y: (y - 6).toFixed(1), class: 'axis-name', 'text-anchor': anchor});
@@ -1709,6 +1712,9 @@ class WeatherScheduleCard extends HTMLElement {
             svg.appendChild(value);
         });
 
+        // O poligono passa por cima do centro; um disco da cor do fundo devolve
+        // o miolo para o texto, como o furo de uma rosca.
+        svg.appendChild(make('circle', {cx, cy, r: hole - 3, class: 'core-plate'}));
         const core = make('text', {x: cx, y: cy + 2, class: 'dial-core', 'text-anchor': 'middle'});
         core.textContent = `${this.#number(onTarget, 1)}%`;
         svg.appendChild(core);
@@ -1716,14 +1722,12 @@ class WeatherScheduleCard extends HTMLElement {
         label.textContent = this.#text.inRange;
         svg.appendChild(label);
 
-        const mark = make('text', {x: cx + 5, y: cy - radius - 4, class: 'ring-mark'});
-        mark.textContent = `${scale}%`;
-        svg.appendChild(mark);
-
         const blind = share.blind / (share.blind + share.measured) * 100;
-        this.#node.dialLegend.textContent = blind >= 1
-            ? `${this.#text.driftShare} · ${this.#number(blind, 0)}% ${this.#text.noReading}`
-            : this.#text.driftShare;
+        this.#node.dialLegend.textContent = [
+            this.#text.driftShare,
+            `${this.#text.outerRing} ${scale}%`,
+            blind >= 1 ? `${this.#number(blind, 0)}% ${this.#text.noReading}` : '',
+        ].filter(Boolean).join(' · ');
     }
 
     #leafDrop(room) {

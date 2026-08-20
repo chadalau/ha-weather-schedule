@@ -91,8 +91,9 @@ condensation starts at.
 The chip shows what the room is right now; tapping it opens a radar of what the
 room *was*, over the same 6 h / 24 h / 3 d / 7 d ranges. One spoke per drift,
 each facing its opposite — dry against humid, cold against warm — so a bad day
-has a shape before it has numbers, and a good day is a dot in the middle. The
-centre carries the share of the time on target.
+has a shape before it has numbers, and a good day shrinks to the inner ring. The
+scale starts at that ring rather than at the centre: the middle belongs to the
+number it holds, the share of the window spent on target.
 
 The spokes come from the `drifts` attribute, not from the state — the state
 carries only the first drift, so a room that is warm and dry at once would count
