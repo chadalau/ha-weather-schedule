@@ -9,11 +9,19 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
 const HISTORY_RANGES = [6, 24, 72, 168];
+
+/* Os eixos da estrela, com cada desvio de frente para o seu oposto: seco
+   contra umido, frio contra quente. Assim a forma do poligono ja conta a
+   historia antes de alguem ler os numeros. */
+const DRIFT_AXES = [
+    'vpd_low', 'too_warm', 'too_dry', 'co2_low',
+    'vpd_high', 'too_cold', 'too_humid', 'co2_high',
+];
 const CHART_MAX_POINTS = 1500;
 
 /** Fixed VPD bands, drawn behind the trend so a value reads without a legend. */
@@ -29,7 +37,9 @@ const TEXT = {
     en: {
         band: {under: 'Under transpiration', veg_early: 'Early vegetative', veg_late: 'Late vegetative', flower: 'Flower', over: 'Over range'},
         phase: {propagation: 'Propagation', veg_early: 'Early vegetative', veg_late: 'Late vegetative', flower_early: 'Early flower', flower_late: 'Late flower', dry: 'Drying'},
-        status: {on_target: 'On target', vpd_low: 'VPD low', vpd_high: 'VPD high', too_cold: 'Too cold', too_warm: 'Too warm', too_dry: 'Too dry', too_humid: 'Too humid'},
+        status: {on_target: 'On target', vpd_low: 'VPD low', vpd_high: 'VPD high', too_cold: 'Too cold', too_warm: 'Too warm', too_dry: 'Too dry', too_humid: 'Too humid', co2_low: 'CO₂ low', co2_high: 'CO₂ high'},
+        dayTitle: 'How the day went', inRange: 'on target', noReading: 'no reading',
+        driftShare: 'share of the time in each drift',
         temperature: 'Temperature', humidity: 'Humidity', co2: 'CO₂', dewPoint: 'Dew point',
         dewPointShort: 'Dew point',
         fans: 'Fans', on: 'On', off: 'Off', unavailable: 'Unavailable',
@@ -51,7 +61,9 @@ const TEXT = {
     pt: {
         band: {under: 'Baixa transpiração', veg_early: 'Vegetativo inicial', veg_late: 'Vegetativo tardio', flower: 'Floração', over: 'Acima da faixa'},
         phase: {propagation: 'Propagação', veg_early: 'Vegetativo inicial', veg_late: 'Vegetativo tardio', flower_early: 'Floração inicial', flower_late: 'Floração tardia', dry: 'Secagem'},
-        status: {on_target: 'Na faixa', vpd_low: 'VPD baixo', vpd_high: 'VPD alto', too_cold: 'Frio demais', too_warm: 'Quente demais', too_dry: 'Seco demais', too_humid: 'Úmido demais'},
+        status: {on_target: 'Na faixa', vpd_low: 'VPD baixo', vpd_high: 'VPD alto', too_cold: 'Frio demais', too_warm: 'Quente demais', too_dry: 'Seco demais', too_humid: 'Úmido demais', co2_low: 'CO₂ baixo', co2_high: 'CO₂ alto'},
+        dayTitle: 'Como foi o dia', inRange: 'na faixa', noReading: 'sem leitura',
+        driftShare: 'fatia do tempo em cada desvio',
         temperature: 'Temperatura', humidity: 'Umidade', co2: 'CO₂', dewPoint: 'Ponto de orvalho',
         dewPointShort: 'P. de orvalho',
         fans: 'Ventiladores', on: 'Ligado', off: 'Desligado', unavailable: 'Indisponível',
@@ -282,6 +294,27 @@ svg.chart { display: block; width: 100%; height: auto; border-radius: 10px; }
 .head-label { fill: var(--primary-text-color); font-size: 12px; font-weight: 500; }
 .empty { padding: 20px 0; text-align: center; color: var(--secondary-text-color); }
 
+/* A estrela do dia. Poligono pequeno e dia bom: cada ponta e o tempo que a
+   sala passou naquele desvio. */
+.chip.status { appearance: none; cursor: pointer; font: inherit; }
+.chip.status:hover { border-color: var(--ws-teal); }
+dialog.dial { border: 1px solid var(--divider-color); border-radius: 14px; padding: 0;
+  width: min(520px, 94vw); background: var(--card-background-color); color: var(--primary-text-color); }
+dialog.dial::backdrop { background: rgba(0, 0, 0, .55); }
+.dial-legend { text-align: center; font-size: 12px; color: var(--secondary-text-color); }
+.ring { fill: none; stroke: var(--divider-color); stroke-width: 1; }
+.spoke { stroke: var(--divider-color); stroke-width: 1; opacity: .65; }
+.web { fill: var(--ws-amber, #e7c12b); fill-opacity: .26; stroke: var(--ws-amber, #e7c12b); stroke-width: 2;
+  stroke-linejoin: round; }
+.web-dot { fill: var(--ws-amber, #e7c12b); }
+.axis-name { fill: var(--secondary-text-color); font-size: 11px; }
+.axis-share { fill: var(--primary-text-color); font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.axis-share.quiet { fill: var(--secondary-text-color); font-weight: 400; }
+.dial-core { fill: var(--ws-teal); font-size: 27px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dial-core-label { fill: var(--secondary-text-color); font-size: 11px; }
+.ring-mark { fill: var(--secondary-text-color); font-size: 10px; opacity: .8; }
+
 /* Same geometry as the light tiles of the Light Scheduler card — 52px tall,
    two per row, icon plus copy on the left and a pill on the right. Only the
    palette changes: teal for a running fan instead of amber for a lit lamp. */
@@ -378,6 +411,7 @@ class WeatherScheduleCard extends HTMLElement {
     #ticker = null;
     #historySpec = null;
     #historyHours = 24;
+    #dialHours = 24;
     #request = 0;
     #closePhaseMenu = null;
     #node = {};
@@ -900,7 +934,7 @@ class WeatherScheduleCard extends HTMLElement {
             <div class="header">
                 <div class="header-left">
                     <div class="rooms" role="group"></div>
-                    <span class="chip status" hidden><span class="dot"></span><span class="status-text"></span></span>
+                    <button type="button" class="chip status" hidden><span class="dot"></span><span class="status-text"></span></button>
                 </div>
                 <div class="header-right">
                     <div class="phase-wrap" hidden>
@@ -924,6 +958,18 @@ class WeatherScheduleCard extends HTMLElement {
                 <div class="title"></div>
                 <div class="fan-grid"></div>
             </div>
+            <dialog class="dial">
+                <div class="history-body">
+                    <div class="history-head">
+                        <h3></h3>
+                        <div class="range"></div>
+                        <button type="button" class="close" aria-label="${this.#text.close}"><ha-icon icon="mdi:close"></ha-icon></button>
+                    </div>
+                    <svg class="dial-chart" viewBox="0 0 460 400" role="img"></svg>
+                    <div class="dial-legend"></div>
+                    <div class="empty" hidden></div>
+                </div>
+            </dialog>
             <dialog class="history">
                 <div class="history-body">
                     <div class="history-head">
@@ -977,6 +1023,12 @@ class WeatherScheduleCard extends HTMLElement {
             fans: card.querySelector('.fans'),
             fansTitle: card.querySelector('.fans .title'),
             fanGrid: card.querySelector('.fan-grid'),
+            dial: card.querySelector('dialog.dial'),
+            dialTitle: card.querySelector('.dial h3'),
+            dialRange: card.querySelector('.dial .range'),
+            dialChart: card.querySelector('.dial-chart'),
+            dialLegend: card.querySelector('.dial-legend'),
+            dialEmpty: card.querySelector('.dial .empty'),
             history: card.querySelector('dialog.history'),
             historyTitle: card.querySelector('.history h3'),
             historyRange: card.querySelector('.history .range'),
@@ -1007,6 +1059,19 @@ class WeatherScheduleCard extends HTMLElement {
             });
             this.#node.historyRange.appendChild(chip);
         }
+        card.querySelector('.dial .close').addEventListener('click', () => this.#node.dial.close());
+        for (const hours of HISTORY_RANGES) {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.dataset.hours = String(hours);
+            chip.textContent = hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
+            chip.addEventListener('click', () => {
+                this.#dialHours = hours;
+                this.#drawDial();
+            });
+            this.#node.dialRange.appendChild(chip);
+        }
+        this.#node.status.addEventListener('click', () => this.#openDial());
         this.#node.sheetCancel.addEventListener('click', () => this.#node.sheet.close());
         this.#node.sheetSave.addEventListener('click', () => this.#saveSheet());
 
@@ -1452,6 +1517,187 @@ class WeatherScheduleCard extends HTMLElement {
         }
         if (token !== this.#request) return;
         this.#paint(this.#dialogChart(), spec, series, hours);
+    }
+
+    /* ------------------------------------------------------------------
+       A estrela do dia: quanto do tempo a sala passou em cada desvio.
+       ------------------------------------------------------------------ */
+
+    async #openDial() {
+        const room = this.#resolve(this.#config.rooms[this.#room] || {});
+        if (!room.status) return;
+        this.#node.dialTitle.textContent = this.#text.dayTitle;
+        this.#node.dial.showModal();
+        await this.#drawDial();
+    }
+
+    async #drawDial() {
+        const room = this.#resolve(this.#config.rooms[this.#room] || {});
+        if (!room.status) return;
+        const hours = this.#dialHours;
+        for (const chip of this.#node.dialRange.children) {
+            chip.classList.toggle('on', Number(chip.dataset.hours) === hours);
+        }
+        this.#node.dialEmpty.hidden = true;
+        this.#node.dialChart.replaceChildren();
+
+        const token = ++this.#request;
+        let share = null;
+        try {
+            share = await this.#dayShare(room.status, hours);
+        } catch (error) {
+            console.warn('weather-schedule-card: status history unavailable', error);
+        }
+        if (token !== this.#request) return;
+
+        if (!share || !share.measured) {
+            this.#node.dialEmpty.hidden = false;
+            this.#node.dialEmpty.textContent = this.#text.noHistory;
+            this.#node.dialLegend.textContent = '';
+            return;
+        }
+        this.#paintDial(share);
+    }
+
+    /* O estado do sensor conta só o primeiro desvio; a lista completa mora no
+       atributo `drifts`, e é ela que a estrela usa. Um instante quente e seco
+       ao mesmo tempo pesa nos dois eixos, então as fatias não somam 100%. */
+    async #dayShare(entityId, hours) {
+        const end = new Date();
+        const start = new Date(end.getTime() - hours * 3600000);
+        const answer = await this.#hass.callWS({
+            type: 'history/history_during_period',
+            start_time: start.toISOString(),
+            end_time: end.toISOString(),
+            entity_ids: [entityId],
+            minimal_response: false,
+            no_attributes: false,
+            significant_changes_only: false,
+        });
+
+        const raw = answer?.[entityId] || [];
+        let attributes = null;
+        const points = raw.map(point => {
+            // Nesse formato os atributos só reaparecem quando mudam.
+            attributes = point.a ?? point.attributes ?? attributes;
+            return {
+                time: (point.lu ?? point.last_updated ?? 0) * 1000,
+                state: point.s ?? point.state,
+                drifts: Array.isArray(attributes?.drifts) ? attributes.drifts : null,
+            };
+        }).filter(point => Number.isFinite(point.time));
+
+        const buckets = new Map();
+        let onTarget = 0;
+        let blind = 0;
+        let measured = 0;
+        const floor = start.getTime();
+        const now = end.getTime();
+        for (let index = 0; index < points.length; index++) {
+            const from = Math.max(points[index].time, floor);
+            const to = index + 1 < points.length ? points[index + 1].time : now;
+            const span = Math.max(0, to - from);
+            if (!span) continue;
+            const state = points[index].state;
+            if (!state || state === 'unavailable' || state === 'unknown') {
+                blind += span;
+                continue;
+            }
+            measured += span;
+            const drifts = points[index].drifts
+                ?? (state === 'on_target' ? [] : [state]);
+            if (!drifts.length) {
+                onTarget += span;
+                continue;
+            }
+            for (const drift of drifts) {
+                buckets.set(drift, (buckets.get(drift) || 0) + span);
+            }
+        }
+
+        return {
+            measured,
+            blind,
+            onTarget: measured ? (onTarget / measured) * 100 : 0,
+            axes: DRIFT_AXES.map(key => ({
+                key,
+                share: measured ? ((buckets.get(key) || 0) / measured) * 100 : 0,
+            })),
+        };
+    }
+
+    #paintDial(share) {
+        const svg = this.#node.dialChart;
+        const make = (tag, attributes) => {
+            const node = document.createElementNS(SVG_NS, tag);
+            for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+            return node;
+        };
+        const cx = 230;
+        const cy = 196;
+        const radius = 108;
+        const worst = Math.max(...share.axes.map(axis => axis.share), 0);
+        // A escala fecha no degrau logo acima do pior eixo: com o dia todo em
+        // 5% de desvio, uma escala de 100% desenharia um ponto.
+        const scale = [10, 25, 50, 100].find(step => worst <= step) || 100;
+        const at = (index, value) => {
+            const angle = (Math.PI * 2 * index) / DRIFT_AXES.length - Math.PI / 2;
+            const distance = (Math.min(value, scale) / scale) * radius;
+            return [cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance];
+        };
+
+        for (const step of [0.25, 0.5, 0.75, 1]) {
+            const corners = share.axes.map((_, index) => at(index, scale * step));
+            svg.appendChild(make('polygon', {
+                points: corners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' '),
+                class: 'ring',
+            }));
+        }
+        share.axes.forEach((_, index) => {
+            const [x, y] = at(index, scale);
+            svg.appendChild(make('line', {x1: cx, y1: cy, x2: x.toFixed(1), y2: y.toFixed(1), class: 'spoke'}));
+        });
+
+        const corners = share.axes.map((axis, index) => at(index, axis.share));
+        svg.appendChild(make('polygon', {
+            points: corners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' '),
+            class: 'web',
+        }));
+        corners.forEach(([x, y], index) => {
+            if (share.axes[index].share <= 0) return;
+            svg.appendChild(make('circle', {cx: x.toFixed(1), cy: y.toFixed(1), r: 3.5, class: 'web-dot'}));
+        });
+
+        share.axes.forEach((axis, index) => {
+            const [x, y] = at(index, scale * 1.28);
+            const middle = Math.abs(x - cx) < 6;
+            const anchor = middle ? 'middle' : x > cx ? 'start' : 'end';
+            const name = make('text', {x: x.toFixed(1), y: (y - 6).toFixed(1), class: 'axis-name', 'text-anchor': anchor});
+            name.textContent = this.#text.status[axis.key] || axis.key;
+            svg.appendChild(name);
+            const value = make('text', {
+                x: x.toFixed(1), y: (y + 11).toFixed(1), 'text-anchor': anchor,
+                class: axis.share > 0 ? 'axis-share' : 'axis-share quiet',
+            });
+            value.textContent = `${this.#number(axis.share, axis.share >= 10 ? 0 : 1)}%`;
+            svg.appendChild(value);
+        });
+
+        const core = make('text', {x: cx, y: cy + 2, class: 'dial-core', 'text-anchor': 'middle'});
+        core.textContent = `${this.#number(share.onTarget, share.onTarget >= 10 ? 0 : 1)}%`;
+        svg.appendChild(core);
+        const label = make('text', {x: cx, y: cy + 19, class: 'dial-core-label', 'text-anchor': 'middle'});
+        label.textContent = this.#text.inRange;
+        svg.appendChild(label);
+
+        const mark = make('text', {x: cx + 5, y: cy - radius - 4, class: 'ring-mark'});
+        mark.textContent = `${scale}%`;
+        svg.appendChild(mark);
+
+        const blind = share.blind / (share.blind + share.measured) * 100;
+        this.#node.dialLegend.textContent = blind >= 1
+            ? `${this.#text.driftShare} · ${this.#number(blind, 0)}% ${this.#text.noReading}`
+            : this.#text.driftShare;
     }
 
     #leafDrop(room) {

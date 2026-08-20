@@ -86,6 +86,19 @@ drawn behind the line, and a range selector (6 h / 24 h / 3 d / 7 d). The dew
 point uses air temperature minus 2 °C as its ceiling, which is the line
 condensation starts at.
 
+### Tapping the status chip opens the day
+
+The chip shows what the room is right now; tapping it opens a radar of what the
+room *was*, over the same 6 h / 24 h / 3 d / 7 d ranges. One spoke per drift,
+each facing its opposite — dry against humid, cold against warm — so a bad day
+has a shape before it has numbers, and a good day is a dot in the middle. The
+centre carries the share of the time on target.
+
+The spokes come from the `drifts` attribute, not from the state, so a moment
+that was both too warm and too dry counts on both spokes. That means the spokes
+do not add up to 100%: each one is its own share of the time. Stretches where
+the room could not be read are excluded and reported below the chart.
+
 ### Hourly dots
 
 The chart carries one dot per hour, placed on the real sample closest to the
