@@ -141,11 +141,17 @@ class FanCycles:
             try:
                 on = float(cycle.get(CYCLE_ON) or 0)
                 off = float(cycle.get(CYCLE_OFF) or 0)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
-            if not (isfinite(on) and isfinite(off)) or on <= 0 or off <= 0:
+            if not (isfinite(on) and isfinite(off)):
                 continue
-            cycles.append((entity_id, int(on), int(off)))
+            # Truncar depois de validar deixava meio minuto virar zero, e um
+            # passo de zero minuto reagenda no mesmo instante: o ciclo entra em
+            # laço apertado chamando o serviço. Trunca primeiro, julga depois.
+            on, off = int(on), int(off)
+            if on <= 0 or off <= 0:
+                continue
+            cycles.append((entity_id, on, off))
         return cycles
 
     @callback

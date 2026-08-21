@@ -27,7 +27,6 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
-from homeassistant.util.dt import utcnow
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from . import psychrometrics
@@ -374,54 +373,53 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
             leaf_temperature=leaf,
             carbon_dioxide=co2,
         )
+        # A hora do dia não depende de sensor nenhum: ela vale mesmo quando a
+        # sala está cega, e sem ela o card volta a cobrar CO2 no escuro.
+        climate.daytime = self.is_daytime
 
         # Uma sala sem temperatura ou sem umidade não pode ser julgada. Calar o
         # alerta aqui seria dizer que está tudo bem justamente quando não se sabe.
         if air is None or humidity is None:
             climate.readable = False
-            self._cancel_alert_timer()
+            self._forget_alert_timing()
             climate.alert = self._alert
             return climate
 
-        if air is not None and humidity is not None:
-            # A psicrometria é exponencial na temperatura, então a média das
-            # contas não é a conta das médias. Com dois sensores a diferença
-            # chega a 7% num ambiente mal misturado: conta-se ponto a ponto e
-            # a média vem depois.
-            pairs = (
-                list(zip(airs, humidities))
-                if len(airs) == len(humidities) and len(airs) > 1
-                else [(air, humidity)]
+        # A psicrometria é exponencial na temperatura, então a média das
+        # contas não é a conta das médias. Com dois sensores a diferença
+        # chega a 7% num ambiente mal misturado: conta-se ponto a ponto e
+        # a média vem depois.
+        pairs = (
+            list(zip(airs, humidities))
+            if len(airs) == len(humidities) and len(airs) > 1
+            else [(air, humidity)]
+        )
+        drop = self.effective_leaf_drop
+        climate.dew_point = _mean([psychrometrics.dew_point(t, rh) for t, rh in pairs])
+        climate.absolute_humidity = _mean(
+            [psychrometrics.absolute_humidity(t, rh) for t, rh in pairs]
+        )
+        climate.condensation_margin = _mean(
+            [psychrometrics.condensation_margin(t, rh) for t, rh in pairs]
+        )
+        if leaves:
+            # Um termômetro de folha mede a folha inteira da sala: ele vale
+            # para todos os pontos, e não há par a montar.
+            climate.vpd = _mean(
+                [
+                    psychrometrics.vapour_pressure_deficit(leaf, t, rh)
+                    for t, rh in pairs
+                ]
             )
-            drop = self.effective_leaf_drop
-            climate.dew_point = _mean(
-                [psychrometrics.dew_point(t, rh) for t, rh in pairs]
+        else:
+            climate.vpd = _mean(
+                [
+                    psychrometrics.vapour_pressure_deficit(t - drop, t, rh)
+                    for t, rh in pairs
+                ]
             )
-            climate.absolute_humidity = _mean(
-                [psychrometrics.absolute_humidity(t, rh) for t, rh in pairs]
-            )
-            climate.condensation_margin = _mean(
-                [psychrometrics.condensation_margin(t, rh) for t, rh in pairs]
-            )
-            if leaves:
-                # Um termômetro de folha mede a folha inteira da sala: ele vale
-                # para todos os pontos, e não há par a montar.
-                climate.vpd = _mean(
-                    [
-                        psychrometrics.vapour_pressure_deficit(leaf, t, rh)
-                        for t, rh in pairs
-                    ]
-                )
-            else:
-                climate.vpd = _mean(
-                    [
-                        psychrometrics.vapour_pressure_deficit(t - drop, t, rh)
-                        for t, rh in pairs
-                    ]
-                )
 
         window = self.bounds
-        climate.daytime = self.is_daytime
         climate.drifts = self._drifts_of(climate, window)
         # Sem luz não há fotossíntese, então não há alvo de CO2 a cobrar: a
         # janela é de dia, e cobrá-la de madrugada é alarme sobre nada.
@@ -500,7 +498,7 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
     @callback
     def _watch_alert(self, drifting: bool) -> None:
         """Remember how long the room has been like this, and set a check."""
-        now = utcnow()
+        now = dt_util.utcnow()
         if drifting:
             self._settled_since = None
             self._drifting_since = self._drifting_since or now
@@ -538,6 +536,20 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         if self._cancel_timer is not None:
             self._cancel_timer()
             self._cancel_timer = None
+
+    @callback
+    def _forget_alert_timing(self) -> None:
+        """Drop the pending check and the stretch it was counting.
+
+        A room that cannot be read is a room that stopped holding: the
+        tolerance measures a continuous stretch, and an outage breaks it.
+        Keeping the old timestamp would schedule the next check in the past,
+        so the alert would flip the instant a sensor came back — on a stretch
+        nobody ever measured.
+        """
+        self._cancel_alert_timer()
+        self._drifting_since = None
+        self._settled_since = None
 
     @callback
     def _number_of(self, entity_id: str | None) -> float | None:

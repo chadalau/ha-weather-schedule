@@ -45,6 +45,9 @@ from .const import (
     CONF_PROFILES,
     CONF_RELATIVE_HUMIDITY,
     CONF_TRIP_MINUTES,
+    CYCLE_ENABLED,
+    CYCLE_OFF,
+    CYCLE_ON,
     DEFAULT_CLEAR_MINUTES,
     DEFAULT_LEAF_DROP,
     DEFAULT_LIGHT_HOURS,
@@ -53,6 +56,11 @@ from .const import (
     DEFAULT_PROFILES,
     DEFAULT_TRIP_MINUTES,
     DOMAIN,
+    FAN_CYCLE,
+    FAN_DOMAINS,
+    FAN_ENTITY_ID,
+    FAN_NAME,
+    FAN_POWER,
     LEAF_DROP_CEILING,
     PHASES,
     STARTING_PHASE,
@@ -86,8 +94,8 @@ def _clean_cycle(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
     try:
-        on = float(raw.get("on") or 0)
-        off = float(raw.get("off") or 0)
+        on = float(raw.get(CYCLE_ON) or 0)
+        off = float(raw.get(CYCLE_OFF) or 0)
     except (TypeError, ValueError, OverflowError):
         return {}
     if not (isfinite(on) and isfinite(off)):
@@ -95,7 +103,62 @@ def _clean_cycle(raw: Any) -> dict[str, Any]:
     on, off = int(on), int(off)
     if on <= 0 or off <= 0:
         return {}
-    return {"on": on, "off": off, "enabled": bool(raw.get("enabled", True))}
+    return {
+        CYCLE_ON: on,
+        CYCLE_OFF: off,
+        CYCLE_ENABLED: bool(raw.get(CYCLE_ENABLED, True)),
+    }
+
+
+def _mapping(raw: Any) -> dict[str, Any]:
+    """Return a dict out of an extra field, or an empty one.
+
+    These arrive through ``vol.ALLOW_EXTRA``, so the schema never looked at
+    them: a list where a dict was meant would only be found by ``.get`` raising.
+    """
+    return raw if isinstance(raw, dict) else {}
+
+
+def _clean_fans(user_input: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the fans of a room out of what the card sent."""
+    names = _mapping(user_input.get(CONF_FAN_NAMES))
+    powers = _mapping(user_input.get(CONF_FAN_POWERS))
+    cycles = _mapping(user_input.get(CONF_FAN_CYCLES))
+    chosen = user_input.get(CONF_FANS)
+    fans: list[dict[str, Any]] = []
+    for raw in chosen if isinstance(chosen, list) else []:
+        entity_id = str(raw or "")
+        if entity_id.split(".")[0] not in FAN_DOMAINS:
+            continue
+        fans.append(
+            {
+                FAN_ENTITY_ID: entity_id,
+                FAN_NAME: str(names.get(entity_id) or ""),
+                FAN_POWER: str(powers.get(entity_id) or ""),
+                FAN_CYCLE: _clean_cycle(cycles.get(entity_id)),
+            }
+        )
+    return fans
+
+
+def _clean_number(raw: Any, fallback: float, low: float, high: float) -> float:
+    """Return a number inside its range, or the value already in force."""
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    if not isfinite(value):
+        return fallback
+    return min(max(value, low), high)
+
+
+def _entity_list(raw: Any) -> list[str]:
+    """Return the entities of a reading, whatever shape they arrived in."""
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    if isinstance(raw, list):
+        return [str(item) for item in raw if item]
+    return []
 
 
 def _sensor_picker(
@@ -320,7 +383,9 @@ class WeatherScheduleOptionsFlow(OptionsFlow):
                 (BOUND_CO2_MIN, BOUND_CO2_MAX),
             ):
                 # Uma janela invertida é aceita em silêncio e depois julga a sala
-                # ao contrário; melhor recusar aqui.
+                # ao contrário; melhor recusar aqui. Largura zero passa de
+                # propósito: é estranha, mas é coerente — veja
+                # `test_minimum_equal_to_maximum_is_allowed`.
                 if user_input[low] > user_input[high]:
                     errors[low] = "min_above_max"
             if not errors:
@@ -353,34 +418,79 @@ class WeatherScheduleOptionsFlow(OptionsFlow):
         sends a name per fan alongside it, which the schema lets through.
         """
         if user_input is not None:
-            names = user_input.get(CONF_FAN_NAMES) or {}
-            powers = user_input.get(CONF_FAN_POWERS) or {}
-            cycles = user_input.get(CONF_FAN_CYCLES) or {}
-            fans = [
-                {
-                    "entity_id": entity_id,
-                    "name": str(names.get(entity_id) or ""),
-                    "power": str(powers.get(entity_id) or ""),
-                    "cycle": _clean_cycle(cycles.get(entity_id)),
-                }
-                for entity_id in (user_input.get(CONF_FANS) or [])
-                if entity_id
-            ]
-            return self._store({CONF_FANS: fans})
+            return self._store({CONF_FANS: _clean_fans(user_input)})
 
-        chosen = [fan["entity_id"] for fan in self._current.get(CONF_FANS, [])]
+        chosen = [fan[FAN_ENTITY_ID] for fan in self._current.get(CONF_FANS, [])]
         return self.async_show_form(
             step_id="fans",
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_FANS, default=chosen): selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            domain=["fan", "switch"], multiple=True
+                            domain=list(FAN_DOMAINS), multiple=True
                         )
                     )
                 },
                 extra=vol.ALLOW_EXTRA,
             ),
+        )
+
+    async def async_step_card(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Save everything the card's gear changed, in one entry.
+
+        The sheet edits sensors, alert and fans together. Sending them as three
+        separate steps meant three ``create_entry`` calls, so three reloads of
+        the room in a row — and every reload restarts the alert tolerance from
+        zero and re-anchors each fan cycle. One step, one reload.
+
+        Nobody ever sees this form: it is not in the menu, and the card posts
+        its payload straight after opening it.
+        """
+        blank = vol.Schema({}, extra=vol.ALLOW_EXTRA)
+        if user_input is None:
+            return self.async_show_form(step_id="card", data_schema=blank)
+
+        airs = _entity_list(user_input.get(CONF_AIR_TEMPERATURE))
+        humidities = _entity_list(user_input.get(CONF_RELATIVE_HUMIDITY))
+        if not airs or not humidities:
+            # Uma sala sem estes dois não pode ser julgada, e o fluxo comum os
+            # marca obrigatórios; aqui a checagem é nossa.
+            return self.async_show_form(
+                step_id="card", data_schema=blank, errors={"base": "needs_sensors"}
+            )
+
+        current = self._current
+        leaf = _entity_list(user_input.get(CONF_LEAF_SENSOR))
+        co2 = _entity_list(user_input.get(CONF_CARBON_DIOXIDE))
+        return self._store(
+            {
+                CONF_AIR_TEMPERATURE: airs,
+                CONF_RELATIVE_HUMIDITY: humidities,
+                CONF_LEAF_SENSOR: leaf[0] if leaf else None,
+                CONF_CARBON_DIOXIDE: co2[0] if co2 else None,
+                CONF_LEAF_DROP: _clean_number(
+                    user_input.get(CONF_LEAF_DROP),
+                    current.get(CONF_LEAF_DROP, DEFAULT_LEAF_DROP),
+                    0,
+                    LEAF_DROP_CEILING,
+                ),
+                CONF_TRIP_MINUTES: _clean_number(
+                    user_input.get(CONF_TRIP_MINUTES),
+                    current.get(CONF_TRIP_MINUTES, DEFAULT_TRIP_MINUTES),
+                    1,
+                    240,
+                ),
+                CONF_CLEAR_MINUTES: _clean_number(
+                    user_input.get(CONF_CLEAR_MINUTES),
+                    current.get(CONF_CLEAR_MINUTES, DEFAULT_CLEAR_MINUTES),
+                    1,
+                    240,
+                ),
+                CONF_AMBIENT_CO2: bool(user_input.get(CONF_AMBIENT_CO2)),
+                CONF_FANS: _clean_fans(user_input),
+            }
         )
 
     async def async_step_alert(

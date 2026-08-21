@@ -7,7 +7,7 @@ from typing import Final
 DOMAIN: Final = "weather_schedule"
 
 # Keep in sync with manifest.json: it also busts the browser cache of the card.
-VERSION: Final = "1.4.0"
+VERSION: Final = "1.4.1"
 
 CARD_URL_PATH: Final = "/weather_schedule_card"
 CARD_FILENAME: Final = "weather-schedule-card.js"
@@ -30,13 +30,17 @@ CONF_FAN_POWERS: Final = "fan_powers"
 CONF_FAN_CYCLES: Final = "fan_cycles"
 
 FAN_ENTITY_ID: Final = "entity_id"
+FAN_NAME: Final = "name"
+FAN_POWER: Final = "power"
 FAN_CYCLE: Final = "cycle"
 CYCLE_ON: Final = "on"
 CYCLE_OFF: Final = "off"
 CYCLE_ENABLED: Final = "enabled"
 
-DEFAULT_CYCLE_ON: Final = 15
-DEFAULT_CYCLE_OFF: Final = 45
+# Os ventiladores so podem sair destes dominios: o seletor filtra na tela,
+# mas o que chega ao fluxo de opcoes pode vir de qualquer POST.
+FAN_DOMAINS: Final = ("fan", "switch")
+
 CONF_CLEAR_MINUTES: Final = "clear_minutes"
 
 # How much colder the leaf runs than the air when there is no infrared sensor.
@@ -56,7 +60,6 @@ DEFAULT_CLEAR_MINUTES: Final = 5
 
 UNIT_KPA: Final = "kPa"
 UNIT_GRAMS_PER_CUBIC_METRE: Final = "g/m³"
-UNIT_PPM: Final = "ppm"
 
 BOUND_VPD_MIN: Final = "vpd_min"
 BOUND_VPD_MAX: Final = "vpd_max"

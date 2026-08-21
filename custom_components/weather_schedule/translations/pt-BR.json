@@ -93,10 +93,15 @@
           "light_hours": "Horas de luz (24 = nunca escurece)",
           "night_leaf_drop": "Folha mais fria que o ar, no escuro"
         }
+      },
+      "card": {
+        "title": "Ajustes da sala",
+        "description": "Salvo pelo card. Este passo não foi feito para ser aberto na mão."
       }
     },
     "error": {
-      "min_above_max": "O mínimo não pode ser maior que o máximo."
+      "min_above_max": "O mínimo não pode ser maior que o máximo.",
+      "needs_sensors": "A sala precisa de pelo menos um sensor de temperatura e um de umidade."
     }
   },
   "selector": {

@@ -93,10 +93,15 @@
           "light_hours": "Hours of light (24 = never dark)",
           "night_leaf_drop": "Leaf colder than air, in the dark"
         }
+      },
+      "card": {
+        "title": "Room settings",
+        "description": "Saved from the card. This step is not meant to be opened by hand."
       }
     },
     "error": {
-      "min_above_max": "The minimum cannot be greater than the maximum."
+      "min_above_max": "The minimum cannot be greater than the maximum.",
+      "needs_sensors": "A room needs at least one temperature sensor and one humidity sensor."
     }
   },
   "selector": {

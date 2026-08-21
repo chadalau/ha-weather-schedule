@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -23,6 +23,9 @@ const DRIFT_AXES = [
     'vpd_high', 'too_cold', 'too_humid', 'co2_high',
 ];
 const CHART_MAX_POINTS = 1500;
+/* Ponto de partida de um ciclo novo: quinze ligado, quarenta e cinco parado. */
+const DEFAULT_CYCLE_ON = 15;
+const DEFAULT_CYCLE_OFF = 45;
 
 /** Fixed VPD bands, drawn behind the trend so a value reads without a legend. */
 const VPD_BANDS = [
@@ -420,7 +423,9 @@ class WeatherScheduleCard extends HTMLElement {
     #historySpec = null;
     #historyHours = 24;
     #dialHours = 24;
-    #request = 0;
+    /* Um contador por gráfico. Com um só, abrir o histórico cancelava o
+       carregamento do gráfico do card, que ficava vazio até o cache expirar. */
+    #tokens = {card: 0, history: 0, dial: 0};
     #closePhaseMenu = null;
     #node = {};
 
@@ -432,10 +437,13 @@ class WeatherScheduleCard extends HTMLElement {
         if (!config || !Array.isArray(config.rooms) || !config.rooms.length) {
             throw new Error('weather-schedule-card: define at least one room');
         }
+        // O menu de fase deixa um ouvinte no documento; sem fechá-lo antes de
+        // trocar `#node`, ele passaria a rodar contra nós que não existem mais.
+        this.#dropPhaseMenu();
         this.#config = config;
         this.#room = 0;
         this.#seriesKey = '';
-        this.#request++;
+        this.#invalidate();
         this.#built = false;
         this.#node = {};
         if (this.shadowRoot) this.shadowRoot.replaceChildren();
@@ -452,7 +460,34 @@ class WeatherScheduleCard extends HTMLElement {
         clearInterval(this.#ticker);
         this.#ticker = null;
         // Respostas pendentes não devem pintar um card que saiu da tela.
-        this.#request++;
+        this.#invalidate();
+        this.#dropPhaseMenu();
+    }
+
+    /* Toda resposta em voo passa a ser velha: usado ao trocar de sala, ao
+       reconfigurar e ao sair da tela. */
+    #invalidate() {
+        for (const scope of Object.keys(this.#tokens)) this.#tokens[scope]++;
+    }
+
+    #claim(scope) {
+        return ++this.#tokens[scope];
+    }
+
+    #current(scope, token) {
+        return this.#tokens[scope] === token;
+    }
+
+    /* Fecha o menu de fase e larga o ouvinte do documento, sem depender de
+       `#node` — que pode já ter sido trocado. */
+    #dropPhaseMenu() {
+        if (this.#closePhaseMenu) {
+            document.removeEventListener('click', this.#closePhaseMenu);
+            this.#closePhaseMenu = null;
+        }
+        const menu = this.#node?.phaseMenu;
+        if (menu) menu.hidden = true;
+        this.#node?.phaseChip?.setAttribute('aria-expanded', 'false');
     }
 
     set hass(hass) {
@@ -778,16 +813,20 @@ class WeatherScheduleCard extends HTMLElement {
         enabled.type = 'checkbox';
         enabled.dataset.cycleEnabled = '';
         enabled.checked = Boolean(cycle.enabled);
+        // O ciclo conta minutos inteiros: sem `step`, meio minuto passava pelo
+        // card e o backend o descartava calado, com "Salvo" na tela.
         const on = document.createElement('input');
         on.type = 'number';
         on.min = '1';
+        on.step = '1';
         on.dataset.cycleOn = '';
-        on.value = cycle.on || 15;
+        on.value = cycle.on || DEFAULT_CYCLE_ON;
         const off = document.createElement('input');
         off.type = 'number';
         off.min = '1';
+        off.step = '1';
         off.dataset.cycleOff = '';
-        off.value = cycle.off || 45;
+        off.value = cycle.off || DEFAULT_CYCLE_OFF;
         const [before, middle, after] = this.#text.cyclePattern;
         line.append(enabled, document.createTextNode(before), on,
             document.createTextNode(middle), off, document.createTextNode(after));
@@ -858,9 +897,12 @@ class WeatherScheduleCard extends HTMLElement {
         this.#node.sheetNote.classList.remove('bad');
         this.#node.sheetNote.textContent = text.saving;
         try {
-            await this.#submitOptions(entry, 'sensors', sensors);
-            await this.#submitOptions(entry, 'alert', alert);
-            await this.#submitOptions(entry, 'fans', {
+            // Um passo só, uma gravação só. Enquanto isto eram três chamadas,
+            // eram três recargas da sala em sequência — e cada recarga zerava a
+            // tolerância do alerta e reancorava todos os ciclos.
+            await this.#submitOptions(entry, 'card', {
+                ...sensors,
+                ...alert,
                 fans: fans.map(fan => fan.entity_id),
                 fan_names: Object.fromEntries(fans.map(fan => [fan.entity_id, fan.name])),
                 fan_powers: Object.fromEntries(fans.map(fan => [fan.entity_id, fan.power])),
@@ -899,6 +941,13 @@ class WeatherScheduleCard extends HTMLElement {
         return thing.message || thing.body?.message || thing.type || JSON.stringify(thing);
     }
 
+    /* Minutos de ciclo: inteiro, pelo menos um. O backend rejeita o resto, e
+       rejeitar em silêncio é pior do que arredondar aqui, à vista. */
+    #minutes(raw, fallback) {
+        const value = Math.round(Number(raw));
+        return Number.isFinite(value) && value > 0 ? value : fallback;
+    }
+
     #collectFans() {
         return [...this.#node.sheetFans.querySelectorAll('.fan-block')]
             .map(block => ({
@@ -907,8 +956,8 @@ class WeatherScheduleCard extends HTMLElement {
                 power: block.querySelector('[data-fan-power]').value.trim(),
                 cycle: {
                     enabled: block.querySelector('[data-cycle-enabled]').checked,
-                    on: Number(block.querySelector('[data-cycle-on]').value) || 0,
-                    off: Number(block.querySelector('[data-cycle-off]').value) || 0,
+                    on: this.#minutes(block.querySelector('[data-cycle-on]').value, DEFAULT_CYCLE_ON),
+                    off: this.#minutes(block.querySelector('[data-cycle-off]').value, DEFAULT_CYCLE_OFF),
                 },
             }))
             .filter(fan => fan.entity_id);
@@ -957,7 +1006,11 @@ class WeatherScheduleCard extends HTMLElement {
         const values = this.#sensorsOf(room, role)
             .map(entityId => convert(entityId))
             .filter(Number.isFinite);
-        if (values.length > 1) return values.reduce((total, value) => total + value, 0) / values.length;
+        // Um unico sensor lido ja e a sala. Exigir dois aqui devolvia o
+        // fallback - sempre o PRIMEIRO sensor da lista -, entao a tile ficava
+        // em `--` justamente quando o que caiu era o primeiro e outro
+        // continuava reportando.
+        if (values.length) return values.reduce((total, value) => total + value, 0) / values.length;
         return convert(fallback);
     }
 
@@ -1174,14 +1227,14 @@ class WeatherScheduleCard extends HTMLElement {
     /* Um clique em qualquer outro lugar fecha o menu - inclusive fora do card,
        dai o ouvinte no documento enquanto ele esta aberto. */
     #togglePhaseMenu(open) {
-        this.#node.phaseMenu.hidden = !open;
-        this.#node.phaseChip.setAttribute('aria-expanded', String(open));
-        if (open) {
-            this.#closePhaseMenu ??= () => this.#togglePhaseMenu(false);
-            document.addEventListener('click', this.#closePhaseMenu);
-        } else if (this.#closePhaseMenu) {
-            document.removeEventListener('click', this.#closePhaseMenu);
+        if (!open) {
+            this.#dropPhaseMenu();
+            return;
         }
+        this.#node.phaseMenu.hidden = false;
+        this.#node.phaseChip.setAttribute('aria-expanded', 'true');
+        this.#closePhaseMenu ??= () => this.#togglePhaseMenu(false);
+        document.addEventListener('click', this.#closePhaseMenu);
     }
 
     #renderRooms() {
@@ -1199,7 +1252,7 @@ class WeatherScheduleCard extends HTMLElement {
                 button.addEventListener('click', () => {
                     this.#room = index;
                     this.#seriesKey = '';
-                    this.#request++;
+                    this.#invalidate();
                     this.#render();
                 });
                 container.appendChild(button);
@@ -1346,12 +1399,6 @@ class WeatherScheduleCard extends HTMLElement {
             node.classList.toggle('pick', openable);
             node.tabIndex = openable ? 0 : -1;
             node.setAttribute('role', openable ? 'button' : 'presentation');
-            // O more-info do HA nao aceita a faixa-alvo desenhada, entao ela
-            // fica ao alcance do mouse aqui, junto do convite para abrir.
-            const janela = node.querySelector('.window').textContent;
-            node.title = openable
-                ? [this.#text.openHistory, janela].filter(Boolean).join(' · ')
-                : '';
             const [floor, ceiling] = tile.scale;
             const at = value => Math.max(0, Math.min(100, ((value - floor) / (ceiling - floor)) * 100));
             const bounded = Number.isFinite(tile.min) || Number.isFinite(tile.max);
@@ -1373,16 +1420,21 @@ class WeatherScheduleCard extends HTMLElement {
             pin.hidden = !has;
             pin.style.left = `${has ? at(tile.value) : 0}%`;
 
-            const window = node.querySelector('.window');
-            if (tile.note) {
-                window.textContent = tile.note;
-            } else if (!bounded) {
-                window.textContent = '';
-            } else if (!Number.isFinite(tile.min)) {
-                window.textContent = `${this.#text.target} ≤ ${this.#number(high, tile.digits)}`;
-            } else {
-                window.textContent = `${this.#text.target} ${this.#number(low, tile.digits)} – ${this.#number(high, tile.digits)}`;
-            }
+            // `window` sombreava o global dentro deste bloco, e a TDZ que isso
+            // criava obrigava a linha do title a se chamar de outro jeito.
+            const band = !bounded ? ''
+                : !Number.isFinite(tile.min)
+                    ? `${this.#text.target} ≤ ${this.#number(high, tile.digits)}`
+                    : `${this.#text.target} ${this.#number(low, tile.digits)} – ${this.#number(high, tile.digits)}`;
+            node.querySelector('.window').textContent = tile.note || band;
+
+            // O more-info do HA nao aceita a faixa-alvo desenhada, entao ela
+            // fica ao alcance do mouse aqui, junto do convite para abrir. Lida
+            // depois de escrita: antes, o title carregava a faixa do render
+            // anterior — e num card estreito ele é o único lugar onde ela sai.
+            node.title = openable
+                ? [this.#text.openHistory, band].filter(Boolean).join(' · ')
+                : '';
         }
     }
 
@@ -1459,7 +1511,9 @@ class WeatherScheduleCard extends HTMLElement {
             const percentage = Number.parseFloat(this.#state(fan.entity)?.attributes?.percentage);
             if (!Number.isFinite(percentage)) return;
             const current = Math.round(percentage / 25) * 25;
-            const next = SPEED_STEPS[(SPEED_STEPS.indexOf(current) + 1) % SPEED_STEPS.length] ?? SPEED_STEPS[0];
+            // indexOf devolve -1 fora da faixa, e -1 + 1 cai no primeiro passo:
+            // o modulo nunca sai do array, entao nao ha caso a cobrir depois.
+            const next = SPEED_STEPS[(SPEED_STEPS.indexOf(current) + 1) % SPEED_STEPS.length];
             this.#hass.callService('fan', 'set_percentage', {entity_id: fan.entity, percentage: next});
         });
         return tile;
@@ -1497,7 +1551,10 @@ class WeatherScheduleCard extends HTMLElement {
         const pill = tile.querySelector('.speed-pill');
         pill.querySelector('.speed').textContent = adjustable && on ? `${Math.round(percentage)}%` : '—';
         pill.disabled = gone || !adjustable;
-        pill.hidden = !adjustable && Boolean(fan.power);
+        // Um switch nao tem velocidade: a pastilha sai, com ou sem sensor de
+        // potencia. Mostrar um "-" desabilitado era prometer um controle que
+        // aquela entidade nunca teve.
+        pill.hidden = !adjustable;
 
         const watts = tile.querySelector('.power-pill');
         watts.hidden = !fan.power;
@@ -1588,7 +1645,7 @@ class WeatherScheduleCard extends HTMLElement {
         }
         this.#node.historyEmpty.hidden = true;
         this.#node.historyChart.replaceChildren();
-        const token = ++this.#request;
+        const token = this.#claim('history');
         let series = [];
         let ghosts = [];
         try {
@@ -1599,7 +1656,7 @@ class WeatherScheduleCard extends HTMLElement {
         } catch (error) {
             console.warn('weather-schedule-card: history unavailable', error);
         }
-        if (token !== this.#request) return;
+        if (!this.#current('history', token)) return;
         this.#paint(this.#dialogChart(), spec, series, hours, ghosts);
     }
 
@@ -1625,14 +1682,14 @@ class WeatherScheduleCard extends HTMLElement {
         this.#node.dialEmpty.hidden = true;
         this.#node.dialChart.replaceChildren();
 
-        const token = ++this.#request;
+        const token = this.#claim('dial');
         let share = null;
         try {
             share = await this.#dayShare(room.status, hours);
         } catch (error) {
             console.warn('weather-schedule-card: status history unavailable', error);
         }
-        if (token !== this.#request) return;
+        if (!this.#current('dial', token)) return;
 
         if (!share || !share.measured) {
             this.#node.dialEmpty.hidden = false;
@@ -1853,19 +1910,26 @@ class WeatherScheduleCard extends HTMLElement {
         const fresh = key === this.#seriesKey && Date.now() - this.#seriesAt < HISTORY_MAX_AGE;
 
         if (!fresh && this.#hass.callWS && (spec.entity || computable)) {
-            this.#seriesKey = key;
-            this.#seriesAt = Date.now();
             // Trocar de sala durante o await deixaria a resposta antiga pintar
             // o gráfico da sala nova.
-            const token = ++this.#request;
-            let series = [];
+            const token = this.#claim('card');
+            let series = null;
             try {
                 series = await this.#fetchSeries(room, spec, hours);
             } catch (error) {
                 console.warn('weather-schedule-card: history unavailable', error);
             }
-            if (token !== this.#request) return;
-            this.#series = series;
+            if (!this.#current('card', token)) return;
+            // O cache só é selado depois de a resposta chegar. Marcá-lo antes
+            // do await fazia uma falha de rede de um segundo — ou um simples
+            // abrir do diálogo — custar cinco minutos de gráfico vazio.
+            // Uma série vazia que veio de verdade continua valendo cache: é
+            // uma sala sem histórico, não uma busca que falhou.
+            if (series) {
+                this.#series = series;
+                this.#seriesKey = key;
+                this.#seriesAt = Date.now();
+            }
         }
         this.#paint(this.#cardChart(), spec, this.#series, hours);
     }
@@ -1895,9 +1959,11 @@ class WeatherScheduleCard extends HTMLElement {
         const out = [];
         for (const point of first) {
             while (cursor + 1 < second.length && second[cursor + 1].time <= point.time) cursor++;
-            const other = second[cursor]?.value;
-            if (!Number.isFinite(other)) continue;
-            out.push({time: point.time, value: transform(point.value, other)});
+            const other = second[cursor];
+            // Antes de a outra serie comecar nao ha leitura a casar: usar a
+            // primeira dela seria trazer o futuro para tras.
+            if (!other || other.time > point.time || !Number.isFinite(other.value)) continue;
+            out.push({time: point.time, value: transform(point.value, other.value)});
         }
         return out;
     }
@@ -2008,7 +2074,9 @@ class WeatherScheduleCard extends HTMLElement {
         for (const point of temperatures) {
             if (point.time >= firstRecorded) break;
             while (cursor + 1 < humidities.length && humidities[cursor + 1].time <= point.time) cursor++;
-            const humidity = humidities[cursor].value;
+            const paired = humidities[cursor];
+            if (!paired || paired.time > point.time) continue;
+            const humidity = paired.value;
             const air = toCelsius(point.value);
             rebuilt.push({
                 time: point.time,

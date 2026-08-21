@@ -111,13 +111,125 @@ def test_saving_the_window_keeps_the_other_options(options):
     assert options.saved["alert_minutes"] == 30
 
 
+# --------------------------------------------------------------------------- #
+# O passo que o card usa: tudo numa gravação só.
+# --------------------------------------------------------------------------- #
+
+
+def save_card(flow, payload):
+    return asyncio.run(flow.async_step_card(payload))
+
+
+def full_payload(**changes) -> dict:
+    payload = {
+        "air_temperature": ["sensor.air"],
+        "relative_humidity": ["sensor.rh"],
+        "leaf_drop": 2.0,
+        "trip_minutes": 15,
+        "clear_minutes": 5,
+        "ambient_co2": False,
+        "fans": ["fan.exhaust"],
+        "fan_names": {"fan.exhaust": "Exaustor"},
+        "fan_powers": {"fan.exhaust": ""},
+        "fan_cycles": {"fan.exhaust": {"on": 15, "off": 45, "enabled": True}},
+    }
+    payload.update(changes)
+    return payload
+
+
+def test_the_card_saves_sensors_alert_and_fans_in_one_entry(options):
+    """Eram três passos e três recargas; cada recarga zerava o alerta."""
+    result = save_card(options, full_payload())
+
+    assert result["type"] == "create_entry"
+    saved = options.saved
+    assert saved["air_temperature"] == ["sensor.air"]
+    assert saved["trip_minutes"] == 15
+    assert saved["fans"] == [
+        {
+            "entity_id": "fan.exhaust",
+            "name": "Exaustor",
+            "power": "",
+            "cycle": {"on": 15, "off": 45, "enabled": True},
+        }
+    ]
+
+
+def test_the_card_step_keeps_what_the_other_steps_wrote(options):
+    options.entry.options = {"profiles": {"veg_late": {"vpd_min": 0.9}}}
+    save_card(options, full_payload())
+    assert options.saved["profiles"] == {"veg_late": {"vpd_min": 0.9}}
+
+
+def test_clearing_an_optional_sensor_sticks(options):
+    options.entry.options = {"carbon_dioxide": "sensor.co2", "leaf_sensor": "sensor.leaf"}
+    save_card(options, full_payload())
+    assert options.saved["carbon_dioxide"] is None
+    assert options.saved["leaf_sensor"] is None
+
+
+def test_a_room_without_its_two_sensors_is_refused(options):
+    result = save_card(options, full_payload(relative_humidity=[]))
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "needs_sensors"}
+    assert options.saved is None
+
+
+def test_the_card_step_shows_a_form_before_it_is_given_anything(options):
+    """O card navega até o passo e só depois envia o payload."""
+    assert save_card(options, None)["type"] == "form"
+    assert options.saved is None
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({"fan_names": ["Exaustor"]}, "nome como lista em vez de dicionário"),
+        ({"fan_powers": "sensor.watts"}, "potência como texto solto"),
+        ({"fan_cycles": None}, "ciclos ausentes"),
+        ({"fans": "fan.exhaust"}, "escolha como texto em vez de lista"),
+    ],
+)
+def test_a_malformed_fan_payload_never_raises(options, payload, reason):
+    """Achado B10: estes campos entram por ALLOW_EXTRA, sem schema nenhum."""
+    result = save_card(options, full_payload(**payload))
+    assert result["type"] == "create_entry", reason
+
+
+def test_a_fan_outside_its_domains_is_dropped(options):
+    """O seletor filtra o domínio na tela; o POST pode trazer o que quiser."""
+    save_card(options, full_payload(fans=["light.grow", "fan.exhaust"]))
+
+    assert [fan["entity_id"] for fan in options.saved["fans"]] == ["fan.exhaust"]
+
+
+@pytest.mark.parametrize(
+    ("field", "sent", "expected"),
+    [
+        ("trip_minutes", 9000, 240),
+        ("trip_minutes", 0, 1),
+        ("clear_minutes", "muitos", 5),
+        ("leaf_drop", 99, 6.0),
+        ("leaf_drop", -3, 0),
+    ],
+)
+def test_numbers_from_the_card_are_kept_inside_their_range(options, field, sent, expected):
+    """Sem schema, o número chega cru: quem limita é o passo."""
+    save_card(options, full_payload(**{field: sent}))
+    assert options.saved[field] == expected
+
+
 def test_every_error_the_code_raises_has_a_message():
     """Um erro sem tradução aparece como a chave crua na tela."""
     source = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
+    # Duas formas no código: atribuir numa chave do dicionário de erros, e
+    # montar o dicionário inteiro na chamada do formulário.
     raised = set(re.findall(r'errors\[[^\]]+\]\s*=\s*"([a-z_]+)"', source))
+    raised |= set(re.findall(r'errors=\{[^}]*"([a-z_]+)"\s*\}', source))
     declared = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
 
-    assert raised, "o teste perdeu o padrão que procura os erros"
+    assert len(raised) > 1, "o teste perdeu o padrão que procura os erros"
     for key in raised:
         assert key in declared["options"]["error"], f"erro {key} sem texto"
 

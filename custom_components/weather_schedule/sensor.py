@@ -90,6 +90,12 @@ SENSORS: tuple[RoomSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENUM,
         options=list(ROOM_STATUSES),
         reading=lambda climate: climate.status,
+        # Uma sala ilegível não tem status, mas continua tendo janela-alvo,
+        # sensores, ventiladores e timers — e é só por estes atributos que o
+        # card os conhece. Home Assistant não publica atributo de entidade
+        # indisponível, então marcá-la assim apagaria metade do card cada vez
+        # que um sensor piscasse. O estado fica `unknown`; a entidade fica.
+        present=lambda _: True,
         # The card reads the entire target window from here in one shot, which
         # is why eight more entities are not needed to publish it.
         extras=lambda coordinator: {

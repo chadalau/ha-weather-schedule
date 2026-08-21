@@ -234,6 +234,12 @@ of the current phase. When temperature or humidity cannot be read at all, the
 room reports no status and the alert stays where it is: an unreadable room is
 not a healthy room, so nothing is cleared on missing data.
 
+What the outage does clear is the count. The tolerance measures a *continuous*
+stretch, and a room nobody could read did not hold anything — so when the
+sensors come back the fifteen minutes start over. Otherwise a sensor that
+dropped out for a morning would trip the alert the second it returned, on a
+stretch nobody measured.
+
 ## Fan timers
 
 Each fan can carry a cycle — so many minutes on, so many off — set in the gear

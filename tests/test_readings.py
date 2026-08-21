@@ -97,6 +97,82 @@ def test_room_without_humidity_does_not_start_a_clear_countdown(coordinator, has
     assert coordinator._cancel_timer is None
 
 
+def test_an_outage_does_not_carry_the_old_drift_into_the_alert(coordinator, hass):
+    """Achado A1: a tolerância mede um trecho contínuo, e o apagão o rompeu.
+
+    Guardar o timestamp velho fazia `_schedule_check` mirar um instante no
+    passado, e o alerta subia no segundo em que o sensor voltasse — sobre um
+    trecho que ninguém mediu.
+    """
+    from homeassistant.util import dt as dt_util
+
+    coordinator._read_room()
+    hass.states.set("sensor.air", "35.0", unit_of_measurement="°C")
+    coordinator._read_room()
+    assert coordinator._drifting_since is not None  # a sala começou a desviar
+
+    hass.states.set("sensor.air", "unavailable")
+    coordinator._read_room()
+
+    assert coordinator._drifting_since is None
+    assert coordinator._settled_since is None
+    assert coordinator._cancel_timer is None
+
+    hass.states.set("sensor.air", "35.0", unit_of_measurement="°C")
+    coordinator._read_room()
+
+    # A contagem recomeça de agora: o alvo tem que estar no futuro.
+    assert coordinator._drifting_since is not None
+    assert hass.scheduled and hass.scheduled[-1][0] > dt_util.utcnow()
+
+
+def test_an_outage_forgets_a_settled_stretch_too(coordinator, hass):
+    """O espelho do mesmo defeito: não é só o alerta que subia sozinho."""
+    coordinator._alert = True
+    # 25 °C com 55% cai no meio da janela: a sala começa a se acalmar.
+    hass.states.set("sensor.air", "25.0", unit_of_measurement="°C")
+    hass.states.set("sensor.humidity", "55", unit_of_measurement="%")
+    coordinator._read_room()
+    assert coordinator._settled_since is not None
+
+    hass.states.set("sensor.humidity", "unavailable")
+    coordinator._read_room()
+
+    assert coordinator._settled_since is None
+    assert coordinator._alert is True  # nada foi limpo pelo apagão
+
+
+def test_an_unreadable_room_still_reports_the_hour(coordinator, hass, monkeypatch):
+    """Achado M3: a hora do dia não depende de sensor nenhum.
+
+    Ficando no default `True`, uma sala escura e cega dizia ao card que era
+    dia, e a faixa-alvo de CO₂ voltava a ser desenhada de madrugada.
+    """
+    import datetime
+
+    import custom_components.weather_schedule.coordinator as coordinator_module
+    from custom_components.weather_schedule.const import (
+        CONF_LIGHT_HOURS,
+        CONF_LIGHTS_ON,
+    )
+
+    fuso = datetime.timezone(datetime.timedelta(hours=-3))
+    monkeypatch.setattr(
+        coordinator_module.dt_util,
+        "now",
+        lambda: datetime.datetime(2026, 8, 20, 15, 0, tzinfo=fuso),
+    )
+    # Acende às 18:00 por dezoito horas, então às 15:00 a sala está escura.
+    coordinator.settings[CONF_LIGHTS_ON] = "18:00:00"
+    coordinator.settings[CONF_LIGHT_HOURS] = 18.0
+    hass.states.set("sensor.humidity", "unavailable")
+
+    climate = coordinator._read_room()
+
+    assert climate.readable is False
+    assert climate.daytime is False
+
+
 def test_healthy_room_reports_on_target(coordinator, hass):
     # 25 °C com 55% cai no meio da janela de veg tardia: VPD 1,07 kPa.
     hass.states.set("sensor.air", "25.0", unit_of_measurement="°C")

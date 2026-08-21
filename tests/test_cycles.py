@@ -32,6 +32,23 @@ def test_disabled_cycle_is_ignored(cycles):
     assert cycles._configured() == []
 
 
+def test_a_sub_minute_cycle_is_refused_not_truncated_to_zero(cycles):
+    """Achado M2: meio minuto virava zero, e um passo de zero reagenda no ato.
+
+    `_configured` truncava depois de validar, então `0.5 > 0` passava e
+    `int(0.5)` chegava ao agendador como zero minuto: o ciclo entrava em laço
+    apertado chamando o serviço. O `_clean_cycle` do fluxo de opções sempre
+    recusou o mesmo valor — as duas guardas agora concordam.
+    """
+    with_fans(cycles, [{"entity_id": "fan.exhaust", "cycle": cycle(0.5, 0.5)}])
+    assert cycles._configured() == []
+
+
+def test_a_cycle_below_a_minute_on_either_side_is_refused(cycles):
+    with_fans(cycles, [{"entity_id": "fan.exhaust", "cycle": cycle(15, 0.9)}])
+    assert cycles._configured() == []
+
+
 def test_fan_without_cycle_is_ignored(cycles):
     with_fans(cycles, [{"entity_id": "fan.exhaust", "name": "Exaustor"}])
     assert cycles._configured() == []
@@ -141,6 +158,7 @@ def test_stop_clears_every_timer_without_touching_the_fans(cycles, hass):
         ({"on": 15, "off": 45, "enabled": True}, {"on": 15, "off": 45, "enabled": True}),
         ({"on": "20", "off": "40"}, {"on": 20, "off": 40, "enabled": True}),
         ({"on": 15.7, "off": 45.2}, {"on": 15, "off": 45, "enabled": True}),
+        ({"on": 0.5, "off": 0.5}, {}),  # trunca para zero: não é ciclo
         ({"on": 0, "off": 45}, {}),
         ({"on": -1, "off": 45}, {}),
         ({"on": float("inf"), "off": 45}, {}),
