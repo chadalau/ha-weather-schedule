@@ -33,15 +33,15 @@ from .const import (
     CONF_AMBIENT_CO2,
     CONF_CARBON_DIOXIDE,
     CONF_CLEAR_MINUTES,
-    CONF_FAN_NAMES,
     CONF_FAN_CYCLES,
+    CONF_FAN_NAMES,
     CONF_FAN_POWERS,
     CONF_FANS,
     CONF_LEAF_DROP,
+    CONF_LEAF_SENSOR,
     CONF_LIGHT_HOURS,
     CONF_LIGHTS_ON,
     CONF_NIGHT_LEAF_DROP,
-    CONF_LEAF_SENSOR,
     CONF_PROFILES,
     CONF_RELATIVE_HUMIDITY,
     CONF_TRIP_MINUTES,
@@ -68,12 +68,15 @@ from .const import (
 
 CONF_PHASE = "phase"
 
+# O que a tela de sensores edita depois que a sala existe. O `leaf_drop` fica
+# de fora de proposito: ele vive na entidade `number`, que restaura o proprio
+# valor a cada arranque. Guardado tambem aqui, o estado restaurado passava por
+# cima da opcao recem-salva e a edicao se perdia sem aviso.
 SENSOR_FIELDS = (
     CONF_AIR_TEMPERATURE,
     CONF_RELATIVE_HUMIDITY,
     CONF_LEAF_SENSOR,
     CONF_CARBON_DIOXIDE,
-    CONF_LEAF_DROP,
 )
 
 # Range and step of each editable bound.
@@ -185,8 +188,12 @@ def _number_box(
     return selector.NumberSelector(config)
 
 
-def _sensor_schema(current: dict[str, Any]) -> vol.Schema:
-    """Return the sensor form, pre-filled with what the room already uses."""
+def _sensor_schema(current: dict[str, Any], seed_leaf_drop: bool = False) -> vol.Schema:
+    """Return the sensor form, pre-filled with what the room already uses.
+
+    `seed_leaf_drop` only at setup, where there is no entity yet to ask: from
+    then on the gap belongs to `number.<room>_leaf_drop`.
+    """
 
     plural = (CONF_AIR_TEMPERATURE, CONF_RELATIVE_HUMIDITY)
 
@@ -214,10 +221,16 @@ def _sensor_schema(current: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_CARBON_DIOXIDE, description=filled(CONF_CARBON_DIOXIDE)
             ): _sensor_picker(SensorDeviceClass.CO2),
-            vol.Required(
-                CONF_LEAF_DROP,
-                default=current.get(CONF_LEAF_DROP, DEFAULT_LEAF_DROP),
-            ): _number_box(0, LEAF_DROP_CEILING, 0.1, "°C"),
+            **(
+                {
+                    vol.Required(
+                        CONF_LEAF_DROP,
+                        default=current.get(CONF_LEAF_DROP, DEFAULT_LEAF_DROP),
+                    ): _number_box(0, LEAF_DROP_CEILING, 0.1, "°C")
+                }
+                if seed_leaf_drop
+                else {}
+            ),
         }
     )
 
@@ -255,7 +268,9 @@ class WeatherScheduleConfigFlow(ConfigFlow, domain=DOMAIN):
                 title=self._name, data={CONF_NAME: self._name, **user_input}
             )
 
-        return self.async_show_form(step_id="sensors", data_schema=_sensor_schema({}))
+        return self.async_show_form(
+            step_id="sensors", data_schema=_sensor_schema({}, seed_leaf_drop=True)
+        )
 
     @staticmethod
     @callback
@@ -470,12 +485,6 @@ class WeatherScheduleOptionsFlow(OptionsFlow):
                 CONF_RELATIVE_HUMIDITY: humidities,
                 CONF_LEAF_SENSOR: leaf[0] if leaf else None,
                 CONF_CARBON_DIOXIDE: co2[0] if co2 else None,
-                CONF_LEAF_DROP: _clean_number(
-                    user_input.get(CONF_LEAF_DROP),
-                    current.get(CONF_LEAF_DROP, DEFAULT_LEAF_DROP),
-                    0,
-                    LEAF_DROP_CEILING,
-                ),
                 CONF_TRIP_MINUTES: _clean_number(
                     user_input.get(CONF_TRIP_MINUTES),
                     current.get(CONF_TRIP_MINUTES, DEFAULT_TRIP_MINUTES),

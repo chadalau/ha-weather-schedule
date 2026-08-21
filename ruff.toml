@@ -1,0 +1,32 @@
+# Lint do Weather Schedule.
+#
+# As regras seguem o núcleo do Home Assistant onde faz diferença — sobretudo a
+# ordenação de imports, que lá mistura `import x` e `from x import y` numa
+# ordem só. Sem isto declarado, cada máquina lintava com um padrão diferente e
+# o resultado dependia de onde o ruff achasse uma configuração.
+
+target-version = "py312"
+line-length = 88
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # `_attr_options = list(PHASES)` é como as entidades do Home Assistant
+    # declaram seus atributos. Exigir `ClassVar` aqui só afastaria o código do
+    # core sem tornar nada mais seguro.
+    "RUF012",
+    # Comprimento de linha, como no núcleo do Home Assistant, fica a cargo de
+    # um formatador — não de um erro de lint sobre código que já está escrito.
+    "E501",
+]
+
+[lint.isort]
+# O núcleo do Home Assistant ordena pelo nome do módulo, não pela forma do
+# import: `import logging` cai entre `functools` e `math`.
+force-sort-within-sections = true
+known-first-party = ["homeassistant"]
+
+[lint.per-file-ignores]
+# Os testes montam objetos por dentro de propósito, sem passar pelos
+# construtores reais: é o que permite exercitar decisão sem subir o HA inteiro.
+"tests/*" = ["SLF001"]

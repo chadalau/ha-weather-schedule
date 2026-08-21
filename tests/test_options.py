@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from pathlib import Path
+import re
 
 import pytest
 
@@ -210,14 +210,52 @@ def test_a_fan_outside_its_domains_is_dropped(options):
         ("trip_minutes", 9000, 240),
         ("trip_minutes", 0, 1),
         ("clear_minutes", "muitos", 5),
-        ("leaf_drop", 99, 6.0),
-        ("leaf_drop", -3, 0),
     ],
 )
 def test_numbers_from_the_card_are_kept_inside_their_range(options, field, sent, expected):
     """Sem schema, o número chega cru: quem limita é o passo."""
     save_card(options, full_payload(**{field: sent}))
     assert options.saved[field] == expected
+
+
+def test_the_leaf_drop_never_reaches_the_options(options):
+    """Achado M2: o valor mora na entidade `number`, e só nela.
+
+    Guardado também nas opções, o estado restaurado da entidade passava por
+    cima da opção recém-salva a cada reload, e a edição sumia sem aviso.
+    """
+    save_card(options, full_payload(leaf_drop=4.0))
+    assert "leaf_drop" not in options.saved
+
+
+def test_the_sensors_step_ignores_a_leaf_drop_that_is_sent_to_it(options):
+    """Nem pelo formulário nativo: um valor antigo não pode reescrever o novo."""
+    options.entry.options = {"leaf_drop": 2.0}
+
+    asyncio.run(
+        options.async_step_sensors(
+            {
+                "air_temperature": ["sensor.air"],
+                "relative_humidity": ["sensor.rh"],
+                "leaf_drop": 5.5,
+            }
+        )
+    )
+
+    # O 5,5 é descartado; o que já estava guardado atravessa o merge intacto.
+    assert options.saved["leaf_drop"] == 2.0
+    assert options.saved["air_temperature"] == ["sensor.air"]
+
+
+def test_the_setup_form_still_seeds_the_leaf_drop():
+    """Na criação da sala não há entidade a quem perguntar."""
+    from custom_components.weather_schedule.config_flow import _sensor_schema
+
+    setup = {str(key) for key in _sensor_schema({}, seed_leaf_drop=True).schema}
+    later = {str(key) for key in _sensor_schema({}).schema}
+
+    assert "leaf_drop" in setup
+    assert "leaf_drop" not in later
 
 
 def test_every_error_the_code_raises_has_a_message():

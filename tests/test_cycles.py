@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+
+from conftest import FakeState, fire
 import pytest
 
-from conftest import FakeState
 from custom_components.weather_schedule.config_flow import _clean_cycle
 
 
@@ -176,3 +178,153 @@ class FakeEvent:
 
     def __init__(self, entity_id: str, state: str) -> None:
         self.data = {"entity_id": entity_id, "new_state": FakeState(state)}
+
+
+# --------------------------------------------------------------------------- #
+# A parte que atua de verdade: o comando, sua confirmação e seu cancelamento.
+#
+# Até aqui a suíte nunca via uma chamada de serviço acontecer — o fake fechava
+# a corrotina sem executá-la. Estes testes rodam o laço de verdade.
+# --------------------------------------------------------------------------- #
+
+
+async def settle(tasks):
+    """Espera as tarefas, com teto próprio.
+
+    Sem o teto, uma regressão que remova o limite do comando não faria o teste
+    falhar: faria a suíte inteira travar, que é o pior jeito de descobrir.
+    """
+    await asyncio.wait_for(
+        asyncio.gather(*tasks, return_exceptions=True), timeout=5
+    )
+
+
+def a_fan_that_cycles(cycles, hass, state="off"):
+    """Um ventilador com ciclo, no estado físico pedido."""
+    with_fans(cycles, [{"entity_id": "fan.exhaust", "cycle": cycle(15, 45)}])
+    hass.states.set("fan.exhaust", state)
+    return cycles
+
+
+def test_a_step_switches_the_fan_and_books_the_next_one(cycles, hass):
+    async def run():
+        a_fan_that_cycles(cycles, hass)
+        cycles.async_restart()
+        fire(hass)  # vence o descanso: hora de ligar
+        hass.states.set("fan.exhaust", "on")  # o ventilador obedeceu
+        await settle(cycles._tasks.values())
+
+    asyncio.run(run())
+
+    assert hass.calls == [("fan", "turn_on", "fan.exhaust")]
+    assert cycles._running["fan.exhaust"] is True
+    assert "fan.exhaust" in cycles._next
+
+
+def test_a_command_still_in_flight_does_not_switch_a_stopped_room(cycles, hass):
+    """Achado A1: o passo antigo atuava depois do pause e depois do unload."""
+
+    async def run():
+        a_fan_that_cycles(cycles, hass)
+        cycles.async_restart()
+        hass.services.block = asyncio.Event()
+        fire(hass)
+        await asyncio.sleep(0)  # o comando parte e fica preso no serviço
+        pending = list(cycles._tasks.values())
+
+        cycles.async_stop()  # pause ou unload no meio do comando
+        during_stop = list(hass.calls)
+
+        hass.services.block.set()  # o serviço finalmente responde
+        await settle(pending)
+        return during_stop
+
+    during_stop = asyncio.run(run())
+
+    assert during_stop == []
+    # O ciclo parado não reagenda nada, aconteça o que acontecer com o comando.
+    assert cycles._next == {}
+    assert cycles._running == {}
+
+
+def test_shutdown_waits_for_the_command_instead_of_leaving_it_behind(cycles, hass):
+    """O unload não pode voltar com um `turn_on` ainda pendurado."""
+
+    async def run():
+        a_fan_that_cycles(cycles, hass)
+        cycles.async_restart()
+        hass.services.block = asyncio.Event()
+        fire(hass)
+        await asyncio.sleep(0)
+        task = next(iter(cycles._tasks.values()))
+
+        hass.services.block.set()
+        await asyncio.wait_for(cycles.async_shutdown(), timeout=5)
+        return task
+
+    task = asyncio.run(run())
+
+    assert task.done()
+    assert cycles._tasks == {}
+
+
+def test_a_refused_command_leaves_the_cycle_on_the_fan_it_actually_has(cycles, hass):
+    """Achado M1: o ciclo dizia "ligado" com o ventilador parado."""
+
+    async def run():
+        a_fan_that_cycles(cycles, hass)
+        cycles.async_restart()
+        hass.services.fail = True
+        fire(hass)  # tenta ligar, e o serviço recusa
+        await settle(cycles._tasks.values())
+
+    asyncio.run(run())
+
+    # O ventilador continua desligado, e a fase do ciclo diz o mesmo.
+    assert hass.states.get("fan.exhaust").state == "off"
+    assert cycles._running["fan.exhaust"] is False
+    # E o próximo passo volta a tentar ligar, em vez de mandar desligar o que
+    # nunca ligou.
+    assert cycles._next["fan.exhaust"] is not None
+
+
+def test_a_command_that_never_answers_gives_up_instead_of_hanging(cycles, hass, monkeypatch):
+    """`blocking=True` sem teto deixaria a tarefa presa para sempre."""
+    import custom_components.weather_schedule.cycles as cycles_module
+
+    monkeypatch.setattr(cycles_module, "SWITCH_TIMEOUT", 0.01)
+
+    async def run():
+        a_fan_that_cycles(cycles, hass)
+        cycles.async_restart()
+        hass.services.block = asyncio.Event()  # nunca solto
+        fire(hass)
+        await settle(cycles._tasks.values())
+
+    asyncio.run(run())
+
+    assert hass.calls == []  # o serviço nunca respondeu
+    assert cycles._tasks == {}  # mas nada ficou pendurado
+    assert cycles._running["fan.exhaust"] is False
+
+
+def test_only_one_command_per_fan_is_ever_in_flight(cycles, hass):
+    """Dois passos opostos em voo poderiam concluir fora de ordem."""
+
+    async def run():
+        a_fan_that_cycles(cycles, hass)
+        cycles.async_restart()
+        hass.services.block = asyncio.Event()
+        fire(hass)
+        await asyncio.sleep(0)
+        first = next(iter(cycles._tasks.values()))
+
+        cycles._step("fan.exhaust", 15, 45, False)  # um segundo passo chega
+        await asyncio.sleep(0)
+        hass.services.block.set()
+        await settle([*cycles._tasks.values(), first])
+        return first
+
+    first = asyncio.run(run())
+
+    assert first.cancelled()  # o passo anterior foi cancelado, não duplicado

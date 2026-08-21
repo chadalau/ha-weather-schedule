@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -870,8 +870,11 @@ class WeatherScheduleCard extends HTMLElement {
         const sensors = {
             air_temperature: picked('air_temperature'),
             relative_humidity: picked('relative_humidity'),
-            leaf_drop: Number(field('leaf_drop').value),
         };
+        // A folha vive na entidade `number`, que restaura o proprio valor a
+        // cada arranque. Mandar o mesmo numero pelas opcoes criava duas fontes
+        // para um valor so, e o estado restaurado ganhava da edicao nova.
+        const leafDrop = Number(field('leaf_drop').value);
         if (!sensors.air_temperature.length || !sensors.relative_humidity.length) {
             this.#node.sheetNote.textContent = this.#text.needSensor;
             this.#node.sheetNote.classList.add('bad');
@@ -908,12 +911,11 @@ class WeatherScheduleCard extends HTMLElement {
                 fan_powers: Object.fromEntries(fans.map(fan => [fan.entity_id, fan.power])),
                 fan_cycles: Object.fromEntries(fans.map(fan => [fan.entity_id, fan.cycle])),
             });
-            // The leaf drop also lives as a number entity, which restores its own
-            // value after the reload; set it too or it would win over the form.
-            if (room.leaf_number) {
+            // A entidade e a fonte do valor, entao e ela que recebe a mudanca.
+            if (room.leaf_number && Number.isFinite(leafDrop)) {
                 await this.#hass.callService('number', 'set_value', {
                     entity_id: room.leaf_number,
-                    value: sensors.leaf_drop,
+                    value: leafDrop,
                 });
             }
             this.#seriesKey = '';
@@ -2462,7 +2464,7 @@ if (!window.customCards.some(card => card.type === 'weather-schedule-card')) {
         name: 'Weather Schedule',
         description: 'VPD, temperature, humidity, CO₂ and fans for one room',
         preview: false,
-        documentationURL: 'https://github.com/chadalau/weather-schedule',
+        documentationURL: 'https://github.com/chadalau/ha-weather-schedule',
     });
 }
 

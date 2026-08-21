@@ -7,6 +7,7 @@ exigiria fixar uma versão do core a cada release.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,18 +42,58 @@ class FakeStates:
         self._states.pop(entity_id, None)
 
 
+class FakeServices:
+    """Um registro de serviços que anota, falha ou trava, conforme o teste.
+
+    Sem isto a suíte não conseguia ver nada do que a integração *faz*: o fake
+    antigo fechava a corrotina sem executá-la, então uma chamada de serviço
+    perdida, uma que falha ou uma que nunca volta eram todas indistinguíveis
+    de sucesso.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+        self.fail = False
+        # Quando presente, a chamada fica parada até o teste soltar o evento.
+        self.block: asyncio.Event | None = None
+
+    async def async_call(
+        self, domain: str, service: str, data: dict, blocking: bool = False
+    ) -> None:
+        if self.block is not None:
+            await self.block.wait()
+        if self.fail:
+            raise RuntimeError(f"{domain}.{service} recusou")
+        self.calls.append((domain, service, data["entity_id"]))
+
+
+class FakeEntry:
+    """O pedaço do config entry que os ciclos usam: criar tarefa própria."""
+
+    def __init__(self) -> None:
+        self.tasks: list[asyncio.Task] = []
+
+    def async_create_task(self, hass, target, *args, **kwargs) -> asyncio.Task:
+        task = asyncio.ensure_future(target)
+        self.tasks.append(task)
+        return task
+
+
 class FakeHass:
     """Guarda o que foi agendado e chamado, para os testes conferirem."""
 
     def __init__(self) -> None:
         self.states = FakeStates()
         self.scheduled: list[tuple[Any, Any]] = []
-        self.calls: list[tuple[str, str, dict]] = []
+        self.services = FakeServices()
 
-    def async_create_task(self, coroutine) -> None:
-        # Os testes não rodam o loop: fechar a corrotina evita o aviso de
-        # "never awaited" sem esconder o que foi pedido.
-        coroutine.close()
+    @property
+    def calls(self) -> list[tuple[str, str, str]]:
+        """Os serviços chamados até agora."""
+        return self.services.calls
+
+    def async_create_task(self, coroutine) -> asyncio.Task:
+        return asyncio.ensure_future(coroutine)
 
 
 @pytest.fixture
@@ -134,11 +175,20 @@ def cycles(hass: FakeHass, coordinator):
     holder = Listeners(coordinator)
     engine = object.__new__(FanCycles)
     engine.hass = hass
-    engine.entry = None
+    engine.entry = FakeEntry()
     engine.coordinator = holder
     engine.enabled = True
     engine._cancel = {}
     engine._watching = None
     engine._next = {}
     engine._running = {}
+    engine._pending = {}
+    engine._tasks = {}
+    engine._generation = 0
     return engine
+
+
+def fire(hass: FakeHass, index: int = -1) -> None:
+    """Dispara um passo agendado, como o relógio do Home Assistant faria."""
+    when, action = hass.scheduled.pop(index)
+    action(when)

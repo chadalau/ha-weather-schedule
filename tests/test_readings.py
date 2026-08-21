@@ -150,11 +150,11 @@ def test_an_unreadable_room_still_reports_the_hour(coordinator, hass, monkeypatc
     """
     import datetime
 
-    import custom_components.weather_schedule.coordinator as coordinator_module
     from custom_components.weather_schedule.const import (
         CONF_LIGHT_HOURS,
         CONF_LIGHTS_ON,
     )
+    import custom_components.weather_schedule.coordinator as coordinator_module
 
     fuso = datetime.timezone(datetime.timedelta(hours=-3))
     monkeypatch.setattr(

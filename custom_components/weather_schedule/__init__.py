@@ -33,7 +33,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: WeatherScheduleEntry) ->
     coordinator.async_start_listening()
     await coordinator.async_config_entry_first_refresh()
     coordinator.cycles = FanCycles(hass, entry, coordinator)
-    entry.async_on_unload(coordinator.cycles.async_stop)
+    # `async_shutdown`, não `async_stop`: o unload precisa esperar os comandos
+    # em voo, senão um `turn_on` parado dentro de uma integração lenta ainda
+    # aciona o ventilador de uma sala que já não existe mais.
+    entry.async_on_unload(coordinator.cycles.async_shutdown)
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -61,7 +64,6 @@ async def _async_serve_card(hass: HomeAssistant) -> None:
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(CARD_REGISTERED):
         return
-    domain_data[CARD_REGISTERED] = True
 
     await hass.http.async_register_static_paths(
         [
@@ -73,3 +75,7 @@ async def _async_serve_card(hass: HomeAssistant) -> None:
         ]
     )
     add_extra_js_url(hass, f"{CARD_URL_PATH}/{CARD_FILENAME}?v={VERSION}")
+    # Marcado no fim, não no começo: erguer a flag antes de servir o arquivo
+    # fazia uma falha aqui convencer a próxima sala de que já estava tudo
+    # publicado, e o card nunca chegava ao frontend.
+    domain_data[CARD_REGISTERED] = True

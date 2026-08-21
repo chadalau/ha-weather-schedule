@@ -390,7 +390,7 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
         # chega a 7% num ambiente mal misturado: conta-se ponto a ponto e
         # a média vem depois.
         pairs = (
-            list(zip(airs, humidities))
+            list(zip(airs, humidities, strict=True))
             if len(airs) == len(humidities) and len(airs) > 1
             else [(air, humidity)]
         )

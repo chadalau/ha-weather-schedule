@@ -27,6 +27,12 @@ class LeafDropNumber(RestoreNumber):
 
     Ignored while an infrared leaf sensor is configured: a measurement always
     beats an assumption.
+
+    This entity is where the gap lives. The config entry only seeds it, once,
+    at setup. Keeping it in the options as well gave the value two homes: the
+    coordinator started from the option, this entity restored its own state a
+    moment later, and whatever had just been saved in Configure was quietly
+    overwritten by the older number.
     """
 
     _attr_has_entity_name = True
