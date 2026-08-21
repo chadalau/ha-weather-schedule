@@ -4,10 +4,10 @@
   "codeowners": ["@chadalau"],
   "config_flow": true,
   "dependencies": ["http", "frontend"],
-  "documentation": "https://github.com/chadalau/weather-schedule",
+  "documentation": "https://github.com/chadalau/ha-weather-schedule",
   "integration_type": "device",
   "iot_class": "calculated",
-  "issue_tracker": "https://github.com/chadalau/weather-schedule/issues",
+  "issue_tracker": "https://github.com/chadalau/ha-weather-schedule/issues",
   "requirements": [],
   "version": "1.4.1"
 }
