@@ -9,10 +9,13 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.4.2';
+const VERSION = '1.4.3';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
+/* Depois de uma busca falhar, esperar isto antes de tentar de novo: sem o
+   intervalo, uma queda de rede vira uma consulta por render. */
+const HISTORY_RETRY = 30000;
 const HISTORY_RANGES = [6, 24, 72, 168];
 
 /* Os eixos da estrela, com cada desvio de frente para o seu oposto: seco
@@ -91,17 +94,42 @@ const TEXT = {
 
 /* Arden Buck, the same curve the integration uses, for rooms configured with
    raw sensors instead of the integration entities. */
+/* Quando um render deve mesmo ir buscar histórico.
+ *
+ * Isolada de propósito: é uma decisão de quatro linhas que já quebrou o
+ * gráfico uma vez, e como função pura ela pode ser exercitada por um teste
+ * sem DOM, sem Home Assistant e sem WebSocket.
+ *
+ * `hass` é empurrado a cada mudança de estado da instância inteira, então
+ * `#loadSeries` roda muitas vezes por segundo. Sem as três recusas abaixo,
+ * cada render cancelava a busca do anterior e nenhuma chegava ao fim.
+ */
+function shouldFetchSeries({key, seriesKey, seriesAt, loadingKey, failedAt, now}) {
+    // Já temos esta série, e ela ainda vale.
+    if (key === seriesKey && now - seriesAt < HISTORY_MAX_AGE) return false;
+    // Já há uma busca em andamento para exatamente esta chave.
+    if (loadingKey === key) return false;
+    // Acabou de falhar: esperar antes de bater de novo.
+    if (failedAt && now - failedAt < HISTORY_RETRY) return false;
+    return true;
+}
+
 const buckGamma = t => (18.678 - t / 234.5) * (t / (257.14 + t));
 const saturationPressure = t => 0.61121 * Math.exp(buckGamma(t));
-const vapourPressureDeficit = (leaf, air, rh) => saturationPressure(leaf) - saturationPressure(air) * rh / 100;
-const dewPoint = (air, rh) => {
+/* Declaracoes, nao constantes: assim um teste consegue alcanca-las sem DOM e
+   conferir se estas contas continuam batendo com as do backend, que sao a
+   mesma curva escrita duas vezes, em duas linguagens. */
+function vapourPressureDeficit(leaf, air, rh) {
+    return saturationPressure(leaf) - saturationPressure(air) * rh / 100;
+}
+function dewPoint(air, rh) {
     /* Inversao exata: manter o termo t/234.5 vira uma quadratica, e a raiz
        menor e a fisica. A forma fechada usual erra ~0,1 grau. */
     const gamma = Math.log(Math.max(rh, 1e-6) / 100) + buckGamma(air);
     const linear = 234.5 * (18.678 - gamma);
     const discriminant = linear * linear - 4 * 234.5 * 257.14 * gamma;
     return (linear - Math.sqrt(Math.max(discriminant, 0))) / 2;
-};
+}
 
 const STYLE = `
 :host { display: block;
@@ -418,6 +446,10 @@ class WeatherScheduleCard extends HTMLElement {
     #series = [];
     #seriesKey = '';
     #seriesAt = 0;
+    /* A chave que esta sendo buscada agora, para dois renders seguidos nao
+       comecarem a mesma busca duas vezes. */
+    #seriesLoading = null;
+    #seriesFailedAt = 0;
     #plots = new WeakMap();
     #ticker = null;
     #historySpec = null;
@@ -468,6 +500,10 @@ class WeatherScheduleCard extends HTMLElement {
        reconfigurar e ao sair da tela. */
     #invalidate() {
         for (const scope of Object.keys(this.#tokens)) this.#tokens[scope]++;
+        // A busca em andamento acabou de perder a validade: soltar a chave,
+        // senao ela bloquearia a proxima busca legitima.
+        this.#seriesLoading = null;
+        this.#seriesFailedAt = 0;
     }
 
     #claim(scope) {
@@ -1909,9 +1945,18 @@ class WeatherScheduleCard extends HTMLElement {
 
         const computable = room.temperature && room.humidity;
         const key = JSON.stringify([this.#room, spec.entity, room.temperature, room.humidity, hours]);
-        const fresh = key === this.#seriesKey && Date.now() - this.#seriesAt < HISTORY_MAX_AGE;
 
-        if (!fresh && this.#hass.callWS && (spec.entity || computable)) {
+        const wanted = shouldFetchSeries({
+            key,
+            seriesKey: this.#seriesKey,
+            seriesAt: this.#seriesAt,
+            loadingKey: this.#seriesLoading,
+            failedAt: this.#seriesFailedAt,
+            now: Date.now(),
+        });
+
+        if (wanted && this.#hass.callWS && (spec.entity || computable)) {
+            this.#seriesLoading = key;
             // Trocar de sala durante o await deixaria a resposta antiga pintar
             // o gráfico da sala nova.
             const token = this.#claim('card');
@@ -1920,19 +1965,25 @@ class WeatherScheduleCard extends HTMLElement {
                 series = await this.#fetchSeries(room, spec, hours);
             } catch (error) {
                 console.warn('weather-schedule-card: history unavailable', error);
+            } finally {
+                if (this.#seriesLoading === key) this.#seriesLoading = null;
             }
-            if (!this.#current('card', token)) return;
             // O cache só é selado depois de a resposta chegar. Marcá-lo antes
             // do await fazia uma falha de rede de um segundo — ou um simples
             // abrir do diálogo — custar cinco minutos de gráfico vazio.
             // Uma série vazia que veio de verdade continua valendo cache: é
             // uma sala sem histórico, não uma busca que falhou.
-            if (series) {
+            if (this.#current('card', token) && series) {
                 this.#series = series;
                 this.#seriesKey = key;
                 this.#seriesAt = Date.now();
+                this.#seriesFailedAt = 0;
+            } else if (!series) {
+                this.#seriesFailedAt = Date.now();
             }
         }
+        // Sempre desenha. Sair antes daqui por causa de uma resposta velha
+        // deixava o gráfico em branco mesmo havendo dados na mão.
         this.#paint(this.#cardChart(), spec, this.#series, hours);
     }
 

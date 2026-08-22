@@ -294,3 +294,17 @@ path, imports nothing else, and runs on any Python with `pytest`:
 ```bash
 cd "Weather Schedule" && python -m pytest tests/test_psychrometrics.py -q
 ```
+
+`tests/card/` covers the card. It loads the shipped file into a `vm` context
+with a stub of the handful of browser globals it touches, so the functions it
+exercises are the ones that actually ship — no browser, no bundler, no
+dependencies beyond Node itself:
+
+```bash
+cd "Weather Schedule" && node --test tests/card/test_series_policy.mjs
+```
+
+What it guards is the policy behind the chart: when a render should go and
+fetch history, and when it should leave the fetch already in flight alone.
+Getting that wrong once left the VPD chart blank while hammering the
+WebSocket, and nothing in the Python suite could have noticed.
