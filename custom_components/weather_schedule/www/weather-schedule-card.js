@@ -9,7 +9,7 @@
  * frontend, so there is no Lovelace resource to register by hand.
  */
 
-const VERSION = '1.4.3';
+const VERSION = '1.4.4';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEED_STEPS = [25, 50, 75, 100];
 const HISTORY_MAX_AGE = 300000;
@@ -25,7 +25,7 @@ const DRIFT_AXES = [
     'vpd_low', 'too_warm', 'too_dry', 'co2_low',
     'vpd_high', 'too_cold', 'too_humid', 'co2_high',
 ];
-const CHART_MAX_POINTS = 1500;
+const SAMPLE_MINUTES = 5;
 /* Ponto de partida de um ciclo novo: quinze ligado, quarenta e cinco parado. */
 const DEFAULT_CYCLE_ON = 15;
 const DEFAULT_CYCLE_OFF = 45;
@@ -53,7 +53,7 @@ const TEXT = {
         target: 'target', margin: 'margin', noHistory: 'No history yet', noRooms: 'Add a room to this card',
         settings: 'Room settings', sensorsGroup: 'Sensors', paramsGroup: 'Parameters',
         leafSensor: 'Leaf (infrared)', another: 'another sensor', leafDrop: 'Leaf colder than air', tripMinutes: 'Off target before alerting',
-        clearMinutes: 'On target before clearing', ambientCo2: 'Room is not CO₂ enriched',
+        clearMinutes: 'On target before clearing', sampleMinutes: 'Chart sample every', ambientCo2: 'Room is not CO₂ enriched',
         none: '— none —', save: 'Save', cancel: 'Cancel', saving: 'Saving…', saved: 'Saved',
         saveFailed: 'Could not save', noEntry: 'Name a status sensor of the integration to edit settings here.',
         now: 'now', lowest: 'low', highest: 'high',
@@ -78,7 +78,7 @@ const TEXT = {
         target: 'alvo', margin: 'margem', noHistory: 'Ainda sem histórico', noRooms: 'Adicione uma sala a este card',
         settings: 'Ajustes da sala', sensorsGroup: 'Sensores', paramsGroup: 'Parâmetros',
         leafSensor: 'Folha (infravermelho)', another: 'outro sensor', leafDrop: 'Folha mais fria que o ar', tripMinutes: 'Fora da faixa antes de alertar',
-        clearMinutes: 'Na faixa antes de desligar', ambientCo2: 'Sala sem enriquecimento de CO₂',
+        clearMinutes: 'Na faixa antes de desligar', sampleMinutes: 'Amostra do gráfico a cada', ambientCo2: 'Sala sem enriquecimento de CO₂',
         none: '— nenhum —', save: 'Salvar', cancel: 'Cancelar', saving: 'Salvando…', saved: 'Salvo',
         saveFailed: 'Não consegui salvar', noEntry: 'Informe um sensor de status da integração para ajustar por aqui.',
         now: 'agora', lowest: 'mín', highest: 'máx',
@@ -104,6 +104,30 @@ const TEXT = {
  * `#loadSeries` roda muitas vezes por segundo. Sem as três recusas abaixo,
  * cada render cancelava a busca do anterior e nenhuma chegava ao fim.
  */
+function resampleSeries(points, start, now, stepMs) {
+    if (!points.length || !(stepMs > 0)) return [];
+    const out = [];
+    let cursor = 0;
+    let held = null;
+    for (let mark = Math.ceil(start / stepMs) * stepMs; mark < now; mark += stepMs) {
+        let low = Infinity;
+        let high = -Infinity;
+        while (cursor < points.length && points[cursor].time <= mark) {
+            held = points[cursor++];
+            if (held.value < low) low = held.value;
+            if (held.value > high) high = held.value;
+        }
+        if (held === null) continue;
+        out.push({
+            time: mark,
+            value: held.value,
+            low: low === Infinity ? held.value : low,
+            high: high === -Infinity ? held.value : high,
+        });
+    }
+    return out;
+}
+
 function shouldFetchSeries({key, seriesKey, seriesAt, loadingKey, failedAt, now}) {
     // Já temos esta série, e ela ainda vale.
     if (key === seriesKey && now - seriesAt < HISTORY_MAX_AGE) return false;
@@ -778,6 +802,7 @@ class WeatherScheduleCard extends HTMLElement {
         this.#node.sheetParams.replaceChildren(
             this.#groupTitle(text.paramsGroup),
             this.#numberField('leaf_drop', text.leafDrop, settings.leaf_drop ?? 2, 0, 6, 0.1),
+            this.#numberField('sample_minutes', text.sampleMinutes, settings.sample_minutes ?? 5, 1, 60, 1),
             this.#numberField('trip_minutes', text.tripMinutes, settings.trip_minutes ?? 15, 1, 240, 1),
             this.#numberField('clear_minutes', text.clearMinutes, settings.clear_minutes ?? 5, 1, 240, 1),
             this.#checkField('ambient_co2', text.ambientCo2, Boolean(settings.ambient_co2)),
@@ -920,6 +945,7 @@ class WeatherScheduleCard extends HTMLElement {
         if (field('leaf_sensor').value) sensors.leaf_sensor = field('leaf_sensor').value;
 
         const alert = {
+            sample_minutes: Number(field('sample_minutes').value),
             trip_minutes: Number(field('trip_minutes').value),
             clear_minutes: Number(field('clear_minutes').value),
             ambient_co2: field('ambient_co2').checked,
@@ -1642,6 +1668,14 @@ class WeatherScheduleCard extends HTMLElement {
        da fase atual, que é justamente o que o histórico nativo não desenha. */
     #readingSpec(key, room, climate, bounds) {
         const text = this.#text;
+        // Todo grafico do dialogo usa a mesma grade do grafico do card.
+        const sampleMs = this.#sampleStep(room);
+        const spec = this.#readingShape(key, room, climate, bounds);
+        return {...spec, sampleMs};
+    }
+
+    #readingShape(key, room, climate, bounds) {
+        const text = this.#text;
         switch (key) {
             case 'vpd':
                 return {key, entity: room.vpd, label: 'VPD', unit: 'kPa', digits: 2, isVpd: true,
@@ -1935,7 +1969,7 @@ class WeatherScheduleCard extends HTMLElement {
         return {
             key: 'vpd', entity: room.vpd, label: 'VPD', unit: 'kPa', digits: 2, isVpd: true,
             value: climate.vpd, low: bounds.vpd_min, high: bounds.vpd_max,
-            leafDrop: this.#leafDrop(room),
+            leafDrop: this.#leafDrop(room), sampleMs: this.#sampleStep(room),
         };
     }
 
@@ -2146,13 +2180,15 @@ class WeatherScheduleCard extends HTMLElement {
        recorder; sem um teto, a linha vira um SVG com dezenas de milhares de
        pontos e o navegador leva segundos para desenhá-lo. Mantém um número
        fixo de amostras espaçadas de forma uniforme, preservando a forma. */
-    #downsample(points, limit) {
-        if (points.length <= limit) return points;
-        const kept = new Array(limit);
-        const step = (points.length - 1) / (limit - 1);
-        for (let i = 0; i < limit; i++) kept[i] = points[Math.round(i * step)];
-        kept[limit - 1] = points[points.length - 1];
-        return kept;
+    /* De quanto em quanto tempo a linha e amostrada, em milissegundos.
+       Mora nas opcoes da sala, junto do resto que a engrenagem edita: e uma
+       preferencia que se muda olhando o grafico, nao editando YAML. */
+    #sampleStep(room) {
+        const minutes = Number(this.#state(room?.status)?.attributes?.settings?.sample_minutes);
+        const chosen = Number.isFinite(minutes) && minutes >= 1 && minutes <= 60
+            ? minutes
+            : SAMPLE_MINUTES;
+        return chosen * 60000;
     }
 
     /* O mesmo motor desenha o gráfico do card e o do diálogo. O alvo diz onde
@@ -2161,8 +2197,11 @@ class WeatherScheduleCard extends HTMLElement {
         const svg = target.svg;
         const now = Date.now();
         const start = now - hours * 3600000;
+        // Cuidado: `stepMs` mais abaixo e outra coisa - o espacamento dos
+        // pontos por hora. Este aqui e o da amostragem da linha.
+        const sampleMs = spec.sampleMs || SAMPLE_MINUTES * 60000;
         let points = (series || []).filter(point => point.time >= start).sort((a, b) => a.time - b.time);
-        points = this.#downsample(points, CHART_MAX_POINTS);
+        points = resampleSeries(points, start, now, sampleMs);
         if (Number.isFinite(spec.value)) points.push({time: now, value: spec.value});
 
         svg.replaceChildren();
@@ -2175,9 +2214,12 @@ class WeatherScheduleCard extends HTMLElement {
         // fica no meio delas. Se a escala olhasse so a principal, as sondas
         // seriam achatadas contra a borda do quadro.
         const ghostLines = (ghosts || [])
-            .map(line => (line || [])
-                .filter(point => point.time >= start && Number.isFinite(point.value))
-                .sort((a, b) => a.time - b.time))
+            .map(line => resampleSeries(
+                (line || [])
+                    .filter(point => point.time >= start && Number.isFinite(point.value))
+                    .sort((a, b) => a.time - b.time),
+                start, now, sampleMs,
+            ))
             .filter(line => line.length > 1);
 
         const width = 720;
@@ -2338,7 +2380,10 @@ class WeatherScheduleCard extends HTMLElement {
             if (!sample || closest > tolerance || taken.has(sample.time)) continue;
             taken.add(sample.time);
             const around = points.filter(point => Math.abs(point.time - mark) <= tolerance);
-            const readings = around.map(point => point.value);
+            const readings = around.flatMap(point => [
+                Number.isFinite(point.low) ? point.low : point.value,
+                Number.isFinite(point.high) ? point.high : point.value,
+            ]);
             this.#addSpot(svg, spec, {
                 x: x(sample.time), y: y(sample.value), at: mark, value: sample.value,
                 low: readings.length > 1 ? Math.min(...readings) : null,

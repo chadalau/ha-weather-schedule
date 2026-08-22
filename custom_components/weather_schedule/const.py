@@ -7,7 +7,7 @@ from typing import Final
 DOMAIN: Final = "weather_schedule"
 
 # Keep in sync with manifest.json: it also busts the browser cache of the card.
-VERSION: Final = "1.4.3"
+VERSION: Final = "1.4.4"
 
 CARD_URL_PATH: Final = "/weather_schedule_card"
 CARD_FILENAME: Final = "weather-schedule-card.js"
@@ -24,6 +24,7 @@ CONF_LIGHTS_ON: Final = "lights_on"
 CONF_LIGHT_HOURS: Final = "light_hours"
 CONF_NIGHT_LEAF_DROP: Final = "night_leaf_drop"
 CONF_TRIP_MINUTES: Final = "trip_minutes"
+CONF_SAMPLE_MINUTES: Final = "sample_minutes"
 CONF_FANS: Final = "fans"
 CONF_FAN_NAMES: Final = "fan_names"
 CONF_FAN_POWERS: Final = "fan_powers"
@@ -55,6 +56,11 @@ DEFAULT_NIGHT_LEAF_DROP: Final = 1.0
 LEAF_DROP_CEILING: Final = 6.0
 
 # The alert waits this long before it believes what it sees, in either direction.
+# De quanto em quanto tempo o grafico amostra a linha. Cinco minutos dao 288
+# pontos em vinte e quatro horas: fino o bastante para a forma, leve o
+# bastante para o navegador.
+DEFAULT_SAMPLE_MINUTES: Final = 5
+
 DEFAULT_TRIP_MINUTES: Final = 15
 DEFAULT_CLEAR_MINUTES: Final = 5
 

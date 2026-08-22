@@ -54,6 +54,7 @@ from .const import (
     CONF_NIGHT_LEAF_DROP,
     CONF_PROFILES,
     CONF_RELATIVE_HUMIDITY,
+    CONF_SAMPLE_MINUTES,
     CONF_TRIP_MINUTES,
     DEFAULT_CLEAR_MINUTES,
     DEFAULT_LEAF_DROP,
@@ -61,6 +62,7 @@ from .const import (
     DEFAULT_LIGHTS_ON,
     DEFAULT_NIGHT_LEAF_DROP,
     DEFAULT_PROFILES,
+    DEFAULT_SAMPLE_MINUTES,
     DEFAULT_TRIP_MINUTES,
     PHASE_DRY,
     STARTING_PHASE,
@@ -288,6 +290,9 @@ class RoomCoordinator(DataUpdateCoordinator[RoomClimate]):
                 self.settings.get(CONF_CLEAR_MINUTES, DEFAULT_CLEAR_MINUTES)
             ),
             CONF_AMBIENT_CO2: bool(self.settings.get(CONF_AMBIENT_CO2, False)),
+            CONF_SAMPLE_MINUTES: float(
+                self.settings.get(CONF_SAMPLE_MINUTES, DEFAULT_SAMPLE_MINUTES)
+            ),
         }
 
     @property

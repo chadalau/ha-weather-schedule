@@ -44,6 +44,7 @@ from .const import (
     CONF_NIGHT_LEAF_DROP,
     CONF_PROFILES,
     CONF_RELATIVE_HUMIDITY,
+    CONF_SAMPLE_MINUTES,
     CONF_TRIP_MINUTES,
     CYCLE_ENABLED,
     CYCLE_OFF,
@@ -54,6 +55,7 @@ from .const import (
     DEFAULT_LIGHTS_ON,
     DEFAULT_NIGHT_LEAF_DROP,
     DEFAULT_PROFILES,
+    DEFAULT_SAMPLE_MINUTES,
     DEFAULT_TRIP_MINUTES,
     DOMAIN,
     FAN_CYCLE,
@@ -498,6 +500,14 @@ class WeatherScheduleOptionsFlow(OptionsFlow):
                     240,
                 ),
                 CONF_AMBIENT_CO2: bool(user_input.get(CONF_AMBIENT_CO2)),
+                # De quanto em quanto tempo o gráfico amostra a linha. Fora de
+                # 1 a 60 minutos não é uma grade de relógio que faça sentido.
+                CONF_SAMPLE_MINUTES: _clean_number(
+                    user_input.get(CONF_SAMPLE_MINUTES),
+                    current.get(CONF_SAMPLE_MINUTES, DEFAULT_SAMPLE_MINUTES),
+                    1,
+                    60,
+                ),
                 CONF_FANS: _clean_fans(user_input),
             }
         )

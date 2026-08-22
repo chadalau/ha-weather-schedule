@@ -138,11 +138,27 @@ highest values of that hour when it moved, the VPD band it was in, and whether
 it sat inside the target window. The dot at the right edge is the current
 reading, labelled **now**.
 
+### How often the chart samples
+
+The line is drawn on a fixed grid of clock marks — 00:00, 00:05, 00:10 — each
+carrying the value the room had at that instant, which is the last reading up
+to it. Twenty-four hours becomes 288 points, always the same 288, instead of a
+number that depended on how much the recorder happened to keep.
+
+The interval lives in the gear, in minutes, between 1 and 60. Five is the
+default. Marks before the room's first reading are left out, so the line starts
+where the data starts; the reading of the moment always closes it on the right,
+which is why the last step is usually shorter than the others.
+
+Each point also carries the lowest and highest values of its own slice, so the
+hourly tooltip still reports the real peak of the hour rather than only the
+samples that survived the grid.
+
 ### The gear
 
 The gear in the header opens the room settings: which sensor feeds each
-reading, how much colder the leaf runs than the air, and how long the room has
-to hold before the alert reacts. Saving drives the integration's own options
+reading, how much colder the leaf runs than the air, how often the chart
+samples, and how long the room has to hold before the alert reacts. Saving drives the integration's own options
 flow, so the card never becomes a second place where settings live — what you
 change here is exactly what the Configure dialog would have changed.
 

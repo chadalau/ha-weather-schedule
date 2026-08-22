@@ -110,3 +110,79 @@ test('a psicrometria do card bate com a do backend', () => {
     assert.ok(Math.abs(card.dewPoint(24, 60) - 15.76) < 0.05);
     assert.ok(Math.abs(card.vapourPressureDeficit(22, 24, 60) - 0.854) < 0.005);
 });
+
+// --------------------------------------------------------------------------
+// A grade de amostragem: uma marca a cada N minutos, no relógio.
+// --------------------------------------------------------------------------
+
+const MIN = 60_000;
+
+/* Arrays criados dentro do `vm` têm outro `Array.prototype`, e o `deepEqual`
+   estrito recusa isso mesmo com os valores iguais. `Array.from` traz o
+   resultado para o realm do teste antes de comparar. */
+const plain = (list, fn) => Array.from(list, fn);
+
+/** Uma série a partir de pares [minuto, valor]. */
+function series(pairs, base = 0) {
+    return pairs.map(([minute, value]) => ({time: base + minute * MIN, value}));
+}
+
+test('as marcas caem no relógio, não onde a janela começou', () => {
+    // Janela abrindo às 00:03 — a primeira marca é 00:05, não 00:03.
+    const out = card.resampleSeries(
+        series([[0, 1.0], [4, 1.1], [9, 1.2], [14, 1.3]]),
+        3 * MIN, 17 * MIN, 5 * MIN,
+    );
+    assert.deepEqual(plain(out, p => p.time / MIN), [5, 10, 15]);
+});
+
+test('cada marca leva a última leitura até ali, não a mais próxima', () => {
+    // Marcas em 00:00, 00:05 e 00:10. Em 00:05 a última leitura é a de 00:04;
+    // a de 00:09 ainda não aconteceu e por isso não entra ali.
+    const out = card.resampleSeries(
+        series([[0, 1.0], [4, 1.1], [9, 1.2]]),
+        0, 12 * MIN, 5 * MIN,
+    );
+    assert.deepEqual(plain(out, p => p.value), [1.0, 1.1, 1.2]);
+});
+
+test('marcas anteriores à primeira leitura ficam de fora', () => {
+    // A sala só começou a reportar aos 12 min: nada é inventado antes disso.
+    const out = card.resampleSeries(series([[12, 1.4]]), 0, 20 * MIN, 5 * MIN);
+    assert.deepEqual(plain(out, p => p.time / MIN), [15]);
+});
+
+test('a grade não passa de `now`, para o ponto de agora não colidir', () => {
+    const out = card.resampleSeries(
+        series([[0, 1.0], [5, 1.1], [10, 1.2]]),
+        0, 10 * MIN, 5 * MIN,
+    );
+    assert.ok(out.every(p => p.time < 10 * MIN));
+});
+
+test('cada ponto carrega os extremos da fatia dele', () => {
+    // Entre 00:00 e 00:05 a sala foi de 1,0 a 1,9 e voltou para 1,2.
+    const out = card.resampleSeries(
+        series([[1, 1.0], [2, 1.9], [4, 1.2]]),
+        0, 7 * MIN, 5 * MIN,
+    );
+    assert.equal(out[0].value, 1.2);   // o valor é o último até a marca
+    assert.equal(out[0].low, 1.0);     // mas o pico da fatia não se perde
+    assert.equal(out[0].high, 1.9);
+});
+
+test('uma fatia sem leitura nova segura a anterior, sem inventar extremos', () => {
+    const out = card.resampleSeries(series([[1, 1.0]]), 0, 12 * MIN, 5 * MIN);
+    assert.deepEqual(plain(out, p => [p.value, p.low, p.high].join()), ['1,1,1', '1,1,1']);
+});
+
+test('vinte e quatro horas em passos de cinco minutos dão 288 pontos', () => {
+    const day = 24 * 60;
+    const raw = Array.from({length: day}, (_, i) => ({time: i * MIN, value: 1}));
+    assert.equal(card.resampleSeries(raw, 0, day * MIN, 5 * MIN).length, 288);
+});
+
+test('série vazia ou passo inválido não produzem pontos', () => {
+    assert.equal(card.resampleSeries([], 0, MIN, 5 * MIN).length, 0);
+    assert.equal(card.resampleSeries(series([[0, 1]]), 0, MIN, 0).length, 0);
+});
